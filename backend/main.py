@@ -1,4 +1,5 @@
 import os
+import random
 import pandas as pd
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse
@@ -17,22 +18,18 @@ app.add_middleware(
 
 @app.post("/generate-cur")
 async def generate_cur(request: Request):
-    # Parse the JSON payload
+    # Parse incoming request body
     body = await request.json()
-    row_count = body.get("row_count", 20)  # Default to 20 if not provided
+    profile = body.get("profile", "Greenfield")
+    distribution = body.get("distribution", "Evenly Distributed")  # Get distribution
+    row_count = int(body.get("row_count", 20))  # Default to 20 rows if not provided
 
-    # Debugging: Log the received row_count
-    print(f"Raw request body: {body}")
-    print(f"Extracted row_count: {row_count}")
+    # Log received data (for debugging)
+    print(f"Received profile: {profile}")
+    print(f"Received distribution: {distribution}")
+    print(f"Received row_count: {row_count}")
 
-    # Ensure the row_count is parsed as an integer
-    try:
-        row_count = int(row_count)
-        print(f"Parsed row_count: {row_count}")
-    except ValueError:
-        return {"message": "Invalid row_count. It must be an integer.", "url": None}
-
-    # Generate dummy data for the CUR
+    # Generate dummy data based on profile and distribution
     data = {
         "InvoiceId": [f"INV-{i+1}" for i in range(row_count)],
         "UsageAccountId": [f"123456789012" for _ in range(row_count)],
@@ -40,6 +37,14 @@ async def generate_cur(request: Request):
         "UsageType": ["BoxUsage" for _ in range(row_count)],
         "BlendedCost": [round(i * 0.5, 2) for i in range(row_count)],
     }
+
+    # Adjust data based on distribution
+    if distribution == "ML-Focused":
+        data["ProductName"] = ["SageMaker" if i % 2 == 0 else "Amazon EC2" for i in range(row_count)]
+    elif distribution == "Data-Intensive":
+        data["ProductName"] = ["Amazon S3" if i % 3 == 0 else "Amazon Redshift" for i in range(row_count)]
+    elif distribution == "Media-Intensive":
+        data["ProductName"] = ["CloudFront" if i % 4 == 0 else "MediaPackage" for i in range(row_count)]
 
     # Create a DataFrame
     df = pd.DataFrame(data)
