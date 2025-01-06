@@ -81,9 +81,9 @@ export default function App() {
         <div className="flex flex-wrap justify-center gap-4">
           {[
             { name: "Evenly Distributed", description: "Evenly spread across services." },
-            { name: "ML Focused", description: "Emphasizing SageMaker and ML workloads." },
-            { name: "Data Intensive", description: "Focus on S3, Redshift, and data-heavy services." },
-            { name: "Media Intensive", description: "Optimized for high storage and bandwidth needs." },
+            { name: "ML-Focused", description: "Emphasizing SageMaker and ML workloads." },
+            { name: "Data-Intensive", description: "Focus on S3, Redshift, and data-heavy services." },
+            { name: "Media-Intensive", description: "Optimized for high storage and bandwidth needs." },
           ].map((dist) => (
             <Tippy content={dist.description} key={dist.name} arrow={true}>
               <button

@@ -1,9 +1,9 @@
 import os
-import random
 import pandas as pd
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+from curGen import generate_focus_data  # Import the function from curGen.py
 
 app = FastAPI()
 
@@ -16,38 +16,39 @@ app.add_middleware(
     allow_headers=["*"],  # Allow all headers
 )
 
+# Predefined profiles and distributions
+VALID_PROFILES = ["Greenfield", "Large Business", "Enterprise"]
+VALID_DISTRIBUTIONS = ["Evenly Distributed", "ML-Focused", "Data-Intensive", "Media-Intensive"]
+
 @app.post("/generate-cur")
 async def generate_cur(request: Request):
     # Parse incoming request body
     body = await request.json()
-    profile = body.get("profile", "Greenfield")
-    distribution = body.get("distribution", "Evenly Distributed")  # Get distribution
-    row_count = int(body.get("row_count", 20))  # Default to 20 rows if not provided
+
+    # Log the raw request body (for debugging)
+    print(f"Raw request body: {body}")
+
+    profile = body.get("profile", "").strip()
+    distribution = body.get("distribution", "").strip()
+    row_count = body.get("row_count", 20)
+
+    # Validate inputs
+    if profile not in VALID_PROFILES:
+        raise HTTPException(status_code=400, detail="Invalid profile selected.")
+    if distribution not in VALID_DISTRIBUTIONS:
+        raise HTTPException(status_code=400, detail="Invalid distribution selected.")
+    try:
+        row_count = int(row_count)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="row_count must be an integer.")
 
     # Log received data (for debugging)
     print(f"Received profile: {profile}")
     print(f"Received distribution: {distribution}")
     print(f"Received row_count: {row_count}")
 
-    # Generate dummy data based on profile and distribution
-    data = {
-        "InvoiceId": [f"INV-{i+1}" for i in range(row_count)],
-        "UsageAccountId": [f"123456789012" for _ in range(row_count)],
-        "ProductName": ["Amazon EC2" for _ in range(row_count)],
-        "UsageType": ["BoxUsage" for _ in range(row_count)],
-        "BlendedCost": [round(i * 0.5, 2) for i in range(row_count)],
-    }
-
-    # Adjust data based on distribution
-    if distribution == "ML-Focused":
-        data["ProductName"] = ["SageMaker" if i % 2 == 0 else "Amazon EC2" for i in range(row_count)]
-    elif distribution == "Data-Intensive":
-        data["ProductName"] = ["Amazon S3" if i % 3 == 0 else "Amazon Redshift" for i in range(row_count)]
-    elif distribution == "Media-Intensive":
-        data["ProductName"] = ["CloudFront" if i % 4 == 0 else "MediaPackage" for i in range(row_count)]
-
-    # Create a DataFrame
-    df = pd.DataFrame(data)
+    # Generate CUR data using curGen.py
+    df = generate_focus_data(row_count=row_count, distribution=distribution, profile=profile)
 
     # Save the file locally
     filename = f"generated_CUR_{row_count}.csv"
@@ -62,8 +63,11 @@ async def generate_cur(request: Request):
     # Return the file URL
     return {"message": f"FOCUS-conformed CUR with {row_count} rows generated!", "url": file_url}
 
+
 # Serve static files
 @app.get("/files/{filename}")
 async def get_file(filename: str):
     filepath = os.path.join("files", filename)
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail="File not found.")
     return FileResponse(filepath)

@@ -3,7 +3,6 @@ import uuid
 import random
 from datetime import datetime, timezone, timedelta
 
-
 # Define constants for the FOCUS v1.1 specification
 FOCUS_COLUMNS = [
     "InvoiceId",
@@ -59,161 +58,61 @@ FOCUS_COLUMNS = [
     "BillingEntity",
 ]
 
+# Generate realistic AWS account numbers
+def generate_aws_account():
+    prefix = "999"  # Reserved prefix to avoid collisions with real AWS accounts
+    random_digits = random.randint(100000000, 999999999)
+    return f"{prefix}{random_digits}"
 
 # Generate synthetic data for each column
-def generate_focus_data(row_count=20):
+def generate_focus_data(row_count=20, distribution="Evenly Distributed", profile="Greenfield"):
     current_time = datetime.now(timezone.utc)
+
+    # Base data
     data = {
         "InvoiceId": [str(uuid.uuid4()) for _ in range(row_count)],
-        "LinkedAccountId": [
-            str(random.randint(100000000000, 999999999999))
-            for _ in range(row_count)
-        ],
-        "UsageAccountId": [
-            str(random.randint(100000000000, 999999999999))
-            for _ in range(row_count)
-        ],
-        "ProductName": random.choices(
-            ["Amazon EC2", "Amazon S3", "Amazon RDS", "Amazon DynamoDB"],
-            k=row_count,
-        ),
-        "UsageType": random.choices(
-            ["BoxUsage:m5.large", "TimedStorage-Gb", "ReadCapacityUnit-Hrs"],
-            k=row_count,
-        ),
-        "Operation": random.choices(
-            ["RunInstances", "PutObject", "ReadCapacityUnits"], k=row_count
-        ),
-        "AvailabilityZone": random.choices(
-            ["us-east-1a", "us-east-1b", "us-east-1c"], k=row_count
-        ),
+        "LinkedAccountId": [generate_aws_account() for _ in range(row_count)],
+        "UsageAccountId": [generate_aws_account() for _ in range(row_count)],
+        "ProductName": ["Amazon EC2"] * row_count,
+        "UsageType": ["BoxUsage:m5.large"] * row_count,
+        "Operation": ["RunInstances"] * row_count,
+        "AvailabilityZone": random.choices(["us-east-1a", "us-east-1b", "us-east-1c"], k=row_count),
         "Region": ["us-east-1"] * row_count,
         "UsageStartDate": [
-            (current_time - timedelta(hours=i)).strftime(
-                "%Y-%m-%dT%H:%M:%SZ"
-            )
-            for i in range(row_count)
+            (current_time - timedelta(hours=i)).strftime("%Y-%m-%dT%H:%M:%SZ") for i in range(row_count)
         ],
         "UsageEndDate": [
-            (current_time - timedelta(hours=i - 1)).strftime(
-                "%Y-%m-%dT%H:%M:%SZ"
-            )
-            for i in range(row_count)
+            (current_time - timedelta(hours=i - 1)).strftime("%Y-%m-%dT%H:%M:%SZ") for i in range(row_count)
         ],
         "ResourceId": [f"i-{uuid.uuid4().hex[:8]}" for _ in range(row_count)],
-        "UsageAmount": [
-            round(random.uniform(0.5, 10.0), 2) for _ in range(row_count)
-        ],
-        "BlendedCost": [
-            round(random.uniform(0.1, 5.0), 5) for _ in range(row_count)
-        ],
-        "UnblendedCost": [
-            round(random.uniform(0.1, 5.0), 5) for _ in range(row_count)
-        ],
-        "PublicOnDemandCost": [
-            round(random.uniform(0.1, 5.0), 5) for _ in range(row_count)
-        ],
-        "SavingsPlanEffectiveCost": [
-            round(random.uniform(0.05, 0.9), 5) for _ in range(row_count)
-        ],
-        "ReservationEffectiveCost": [
-            round(random.uniform(0.05, 0.9), 5) for _ in range(row_count)
-        ],
-        "DiscountedCost": [
-            round(random.uniform(0.05, 0.5), 5) for _ in range(row_count)
-        ],
-        "Tags": ["tag:Environment=Dev" for _ in range(row_count)],
-        "CostCategory1": random.choices(
-            ["CategoryA", "CategoryB", "CategoryC"], k=row_count
-        ),
-        "CostCategory2": random.choices(
-            ["SubCategoryX", "SubCategoryY", "SubCategoryZ"], k=row_count
-        ),
-        "ResourceTags": ["Key1=Value1,Key2=Value2" for _ in range(row_count)],
-        "ReservationARN": [
-            str(uuid.uuid4()) if random.random() > 0.5 else ""
-            for _ in range(row_count)
-        ],
-        "SavingsPlanARN": [
-            str(uuid.uuid4()) if random.random() > 0.5 else ""
-            for _ in range(row_count)
-        ],
-        "Tenancy": random.choices(
-            ["default", "dedicated", "host"], k=row_count
-        ),
-        "PurchaseOption": random.choices(
-            ["No Upfront", "Partial Upfront", "All Upfront"], k=row_count
-        ),
-        "AmortizedCost": [
-            round(random.uniform(0.1, 5.0), 5) for _ in range(row_count)
-        ],
-        "NetAmortizedCost": [
-            round(random.uniform(0.1, 5.0), 5) for _ in range(row_count)
-        ],
-        "NetUnblendedCost": [
-            round(random.uniform(0.1, 5.0), 5) for _ in range(row_count)
-        ],
-        "Credits": [
-            round(random.uniform(0.01, 1.0), 5) for _ in range(row_count)
-        ],
-        "NetCredits": [
-            round(random.uniform(0.01, 1.0), 5) for _ in range(row_count)
-        ],
-        "Tax": [round(random.uniform(0.01, 0.5), 5) for _ in range(row_count)],
-        "NetTax": [
-            round(random.uniform(0.01, 0.5), 5) for _ in range(row_count)
-        ],
-        "OtherDiscounts": [
-            round(random.uniform(0.01, 1.0), 5) for _ in range(row_count)
-        ],
-        "NetOtherDiscounts": [
-            round(random.uniform(0.01, 1.0), 5) for _ in range(row_count)
-        ],
-        "Rebates": [
-            round(random.uniform(0.01, 0.5), 5) for _ in range(row_count)
-        ],
-        "NetRebates": [
-            round(random.uniform(0.01, 0.5), 5) for _ in range(row_count)
-        ],
-        "Support": [
-            round(random.uniform(0.01, 1.0), 5) for _ in range(row_count)
-        ],
-        "NetSupport": [
-            round(random.uniform(0.01, 1.0), 5) for _ in range(row_count)
-        ],
-        "DiscountedBlendedCost": [
-            round(random.uniform(0.1, 5.0), 5) for _ in range(row_count)
-        ],
-        "DiscountedUnblendedCost": [
-            round(random.uniform(0.1, 5.0), 5) for _ in range(row_count)
-        ],
-        "NormalizedUsageAmount": [
-            round(random.uniform(0.1, 5.0), 5) for _ in range(row_count)
-        ],
+        "UsageAmount": [round(random.uniform(0.5, 10.0), 2) for _ in range(row_count)],
+        "BlendedCost": [round(random.uniform(0.1, 5.0), 5) for _ in range(row_count)],
+        "UnblendedCost": [round(random.uniform(0.1, 5.0), 5) for _ in range(row_count)],
         "CurrencyCode": ["USD"] * row_count,
         "ExchangeRate": [1.0] * row_count,
-        "BillType": random.choices(["Anniversary", "Monthly"], k=row_count),
-        "PricingPlanId": [str(uuid.uuid4()) for _ in range(row_count)],
-        "ServiceCode": random.choices(
-            ["AmazonEC2", "AmazonS3", "AmazonRDS"], k=row_count
-        ),
-        "UsageTypeGroup": random.choices(
-            ["Compute", "Storage", "Database"], k=row_count
-        ),
-        "ChargeType": random.choices(
-            ["Usage", "Recurring", "One-Time"], k=row_count
-        ),
-        "RateId": [random.randint(1000, 9999) for _ in range(row_count)],
-        "BillingEntity": random.choices(["AWS", "ThirdParty"], k=row_count),
     }
-    return pd.DataFrame(data)
 
+    # Adjust data based on profile
+    if profile == "Large Business":
+        data["UsageAmount"] = [round(random.uniform(10, 50), 2) for _ in range(row_count)]
+        data["BlendedCost"] = [round(random.uniform(5, 25), 5) for _ in range(row_count)]
+    elif profile == "Enterprise":
+        data["UsageAmount"] = [round(random.uniform(50, 200), 2) for _ in range(row_count)]
+        data["BlendedCost"] = [round(random.uniform(25, 100), 5) for _ in range(row_count)]
 
-# Generate the synthetic CUR and save it as a CSV file
+    # Adjust data based on distribution
+    if distribution == "ML-Focused":
+        data["ProductName"] = ["SageMaker" if i % 2 == 0 else "Amazon EC2" for i in range(row_count)]
+    elif distribution == "Data-Intensive":
+        data["ProductName"] = ["Amazon S3" if i % 3 == 0 else "Amazon Redshift" for i in range(row_count)]
+    elif distribution == "Media-Intensive":
+        data["ProductName"] = ["CloudFront" if i % 4 == 0 else "MediaPackage" for i in range(row_count)]
+
+    return pd.DataFrame(data, columns=FOCUS_COLUMNS)
+
+# Generate the synthetic CUR and save it as a CSV file (for testing standalone usage)
 if __name__ == "__main__":
     row_count = 20  # Adjust row count as needed
-    synthetic_cur = generate_focus_data(row_count)
+    synthetic_cur = generate_focus_data(row_count, distribution="ML-Focused", profile="Enterprise")
     synthetic_cur.to_csv("synthetic_focus_cur_v1_1.csv", index=False)
-    print(
-        "Synthetic CUR generated and saved as 'synthetic_focus_cur_v1_1.csv'."
-    )
+    print("Synthetic CUR generated and saved as 'synthetic_focus_cur_v1_1.csv'.")
