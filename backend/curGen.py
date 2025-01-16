@@ -11,20 +11,47 @@ def generate_aws_account():
     return f"{prefix}{random_digits}"
 
 # Helper function to generate data for a specific column
-def generate_column_data(column_name, row_count, profile=None, charge_categories=None):
+def generate_column_data(column_name, row_count, profile=None, pricing_quantity=None):
     metadata = FOCUS_METADATA.get(column_name)
     if not metadata:
         raise ValueError(f"Metadata for column '{column_name}' not found.")
 
     # Generate data based on column name
-    if column_name == "AvailabilityZone":
-        zones = ["us-east-1a", "us-east-1b", "us-east-1c"]
-        if charge_categories:
-            return [
-                random.choice(zones) if charge_category in ["Usage", "Purchase"] else None
-                for charge_category in charge_categories
-            ]
-        return [random.choice(zones) if random.random() > 0.1 else None for _ in range(row_count)]
+    if column_name == "ContractedCost":
+        return [
+            round((contracted_unit_price * (quantity or 0)), 2) if contracted_unit_price else billed_cost
+            for contracted_unit_price, quantity, billed_cost in zip(
+                generate_column_data("ContractedUnitPrice", row_count),
+                pricing_quantity or [1] * row_count,
+                generate_column_data("BilledCost", row_count, profile)
+            )
+        ]
+    elif column_name == "ContractedUnitPrice":
+        return [
+            round(random.uniform(0.01, 10.0), 2) if random.random() > 0.2 else None
+            for _ in range(row_count)
+        ]
+    elif column_name == "EffectiveCost":
+        return [
+            round(billed_cost * random.uniform(0.8, 1.0), 2) if billed_cost is not None else None
+            for billed_cost in generate_column_data("BilledCost", row_count, profile)
+        ]
+    elif column_name == "InvoiceIssuerName":
+        return ["AWS Inc."] * row_count
+    elif column_name == "ListCost":
+        return [
+            round((list_unit_price * (quantity or 0)), 2) if list_unit_price else billed_cost
+            for list_unit_price, quantity, billed_cost in zip(
+                generate_column_data("ListUnitPrice", row_count),
+                pricing_quantity or [1] * row_count,
+                generate_column_data("BilledCost", row_count, profile)
+            )
+        ]
+    elif column_name == "ListUnitPrice":
+        return [
+            round(random.uniform(0.01, 15.0), 2) if random.random() > 0.2 else None
+            for _ in range(row_count)
+        ]
     elif column_name == "BilledCost":
         if profile == "Greenfield":
             total_cost = random.uniform(20000, 50000)
@@ -36,7 +63,7 @@ def generate_column_data(column_name, row_count, profile=None, charge_categories
             total_cost = 100000  # Default for testing
         return [round(total_cost / row_count, 2) for _ in range(row_count)]
     elif column_name == "BillingCurrency":
-        return ["USD"] * row_count
+        return ["USD"] * row_count  # Default to "USD" for now.
     elif column_name == "BillingPeriodStart":
         return [
             (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -45,16 +72,6 @@ def generate_column_data(column_name, row_count, profile=None, charge_categories
     elif column_name == "BillingPeriodEnd":
         return [
             datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-            for _ in range(row_count)
-        ]
-    elif column_name == "CapacityReservationId":
-        return [
-            f"cr-{uuid.uuid4().hex[:8]}" if random.random() > 0.5 else None
-            for _ in range(row_count)
-        ]
-    elif column_name == "CapacityReservationStatus":
-        return [
-            random.choice(["Used", "Unused"]) if random.random() > 0.5 else None
             for _ in range(row_count)
         ]
     elif column_name == "ChargeCategory":
@@ -75,7 +92,7 @@ def generate_column_data(column_name, row_count, profile=None, charge_categories
         return [
             random.choice(["One-Time", "Recurring", "Usage-Based"])
             if charge_category != "Purchase" else random.choice(["One-Time", "Recurring"])
-            for charge_category in (charge_categories or ["Usage"] * row_count)
+            for charge_category in generate_column_data("ChargeCategory", row_count)
         ]
     elif column_name == "ChargePeriodEnd":
         return [
@@ -87,65 +104,14 @@ def generate_column_data(column_name, row_count, profile=None, charge_categories
             (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
             for _ in range(row_count)
         ]
-    elif column_name == "CommitmentDiscountCategory":
-        return [
-            random.choice(["Spend", "Usage"]) if random.random() > 0.5 else None
-            for _ in range(row_count)
-        ]
-    elif column_name == "CommitmentDiscountId":
-        return [
-            f"cd-{uuid.uuid4().hex[:8]}" if random.random() > 0.5 else None
-            for _ in range(row_count)
-        ]
-    elif column_name == "CommitmentDiscountName":
-        return [
-            f"Commitment-{i}" if random.random() > 0.5 else None for i in range(row_count)
-        ]
-    elif column_name == "CommitmentDiscountQuantity":
-        return [
-            round(random.uniform(1.0, 100.0), 2) if random.random() > 0.5 else None
-            for _ in range(row_count)
-        ]
-    elif column_name == "CommitmentDiscountStatus":
-        return [
-            random.choice(["Used", "Unused"]) if random.random() > 0.5 else None
-            for _ in range(row_count)
-        ]
-    elif column_name == "CommitmentDiscountType":
-        return [
-            f"Type-{random.randint(1, 5)}" if random.random() > 0.5 else None
-            for _ in range(row_count)
-        ]
-    elif column_name == "CommitmentDiscountUnit":
-        return [
-            random.choice(["GB", "Hours", "Requests", "Transactions"]) if random.random() > 0.5 else None
-            for _ in range(row_count)
-        ]
-    elif column_name == "ConsumedQuantity":
-        return [
-            round(random.uniform(1.0, 100.0), 2) if charge_category == "Usage" and random.random() > 0.5 else None
-            for charge_category in (charge_categories or ["Usage"] * row_count)
-        ]
-    elif column_name == "ConsumedUnit":
-        return [
-            random.choice(["GB", "Hours", "Requests"]) if charge_category == "Usage" and random.random() > 0.5 else None
-            for charge_category in (charge_categories or ["Usage"] * row_count)
-        ]
-
-
-
-
-
-
-
     return [None] * row_count
 
 # Generate synthetic data for the FOCUS dataset
 def generate_focus_data(row_count=20, distribution="Evenly Distributed", profile="Greenfield"):
     current_time = datetime.now(timezone.utc)
 
-    # Generate charge categories first to use them in other column logic
-    charge_categories = generate_column_data("ChargeCategory", row_count)
+    # Generate pricing quantity for applicable calculations
+    pricing_quantity = [random.uniform(1, 100) for _ in range(row_count)]
 
     data = {
         "InvoiceId": [str(uuid.uuid4()) for _ in range(row_count)],
@@ -159,9 +125,7 @@ def generate_focus_data(row_count=20, distribution="Evenly Distributed", profile
             (current_time - timedelta(hours=i - 1)).strftime("%Y-%m-%dT%H:%M:%SZ")
             for i in range(row_count)
         ],
-        "AvailabilityZone": generate_column_data(
-            "AvailabilityZone", row_count, charge_categories=charge_categories
-        ),
+        "AvailabilityZone": generate_column_data("AvailabilityZone", row_count),
         "BilledCost": generate_column_data("BilledCost", row_count, profile=profile),
         "BillingAccountId": [str(uuid.uuid4()) for _ in range(row_count)],
         "BillingAccountName": [
@@ -172,12 +136,10 @@ def generate_focus_data(row_count=20, distribution="Evenly Distributed", profile
         "BillingPeriodEnd": generate_column_data("BillingPeriodEnd", row_count),
         "CapacityReservationId": generate_column_data("CapacityReservationId", row_count),
         "CapacityReservationStatus": generate_column_data("CapacityReservationStatus", row_count),
-        "ChargeCategory": charge_categories,
+        "ChargeCategory": generate_column_data("ChargeCategory", row_count),
         "ChargeClass": generate_column_data("ChargeClass", row_count),
         "ChargeDescription": generate_column_data("ChargeDescription", row_count),
-        "ChargeFrequency": generate_column_data(
-            "ChargeFrequency", row_count, charge_categories=charge_categories
-        ),
+        "ChargeFrequency": generate_column_data("ChargeFrequency", row_count),
         "ChargePeriodEnd": generate_column_data("ChargePeriodEnd", row_count),
         "ChargePeriodStart": generate_column_data("ChargePeriodStart", row_count),
         "CommitmentDiscountCategory": generate_column_data("CommitmentDiscountCategory", row_count),
@@ -187,16 +149,14 @@ def generate_focus_data(row_count=20, distribution="Evenly Distributed", profile
         "CommitmentDiscountStatus": generate_column_data("CommitmentDiscountStatus", row_count),
         "CommitmentDiscountType": generate_column_data("CommitmentDiscountType", row_count),
         "CommitmentDiscountUnit": generate_column_data("CommitmentDiscountUnit", row_count),
-        "ConsumedQuantity": generate_column_data("ConsumedQuantity", row_count, charge_categories=charge_categories),
-        "ConsumedUnit": generate_column_data("ConsumedUnit", row_count, charge_categories=charge_categories),
-
-
-
-
-
-
-
-
+        "ConsumedQuantity": pricing_quantity,
+        "ConsumedUnit": random.choices(["Hours", "Requests", "GB", "Transactions"], k=row_count),
+        "ContractedCost": generate_column_data("ContractedCost", row_count, pricing_quantity=pricing_quantity),
+        "ContractedUnitPrice": generate_column_data("ContractedUnitPrice", row_count),
+        "EffectiveCost": generate_column_data("EffectiveCost", row_count),
+        "InvoiceIssuerName": generate_column_data("InvoiceIssuerName", row_count),
+        "ListCost": generate_column_data("ListCost", row_count, pricing_quantity=pricing_quantity),
+        "ListUnitPrice": generate_column_data("ListUnitPrice", row_count),
     }
 
     return pd.DataFrame(data, columns=FOCUS_METADATA.keys())

@@ -225,6 +225,94 @@ FOCUS_METADATA = {
         "value_format": "Unit Format",
         "generation_logic": "Random unit string if ChargeCategory is 'Usage' and CommitmentDiscountStatus is not 'Unused', otherwise null.",
     },
+    "ContractedCost": {
+        "description": "Cost calculated by multiplying contracted unit price and the corresponding Pricing Quantity.",
+        "type": "metric",
+        "required": True,
+        "data_type": "decimal",
+        "allows_nulls": False,
+        "value_format": "Numeric Format",
+        "range": "Any valid decimal value",
+        "generation_logic": (
+            "Calculated as ContractedUnitPrice × PricingQuantity if ContractedUnitPrice is not null. "
+            "Defaults to BilledCost when unrelated to other charges or null in special cases."
+        ),
+    },
+    "ContractedUnitPrice": {
+        "description": "The agreed-upon unit price for a single Pricing Unit of the associated SKU.",
+        "type": "metric",
+        "required": False,
+        "data_type": "decimal",
+        "allows_nulls": True,
+        "value_format": "Numeric Format",
+        "range": "Any valid non-negative decimal value",
+        "generation_logic": (
+            "Random positive decimal for applicable ChargeCategory and ChargeClass combinations. "
+            "Null for ChargeCategory 'Tax' or in special cases."
+        ),
+    },
+    "EffectiveCost": {
+        "description": "The amortized cost of the charge after applying all reduced rates, discounts, "
+                       "and the applicable portion of relevant prepaid purchases.",
+        "type": "metric",
+        "required": True,
+        "data_type": "decimal",
+        "allows_nulls": False,
+        "value_format": "Numeric Format",
+        "range": "Any valid decimal value",
+        "generation_logic": (
+            "Calculated based on BilledCost, discounts, and prepayments. "
+            "Defaults to 0 for purchases covering future charges, matches BilledCost for credits, "
+            "and may depend on CommitmentDiscountStatus for commitment-related charges."
+        ),
+    },
+    "InvoiceIssuerName": {
+        "description": "The name of the entity responsible for invoicing for the resources or services consumed.",
+        "type": "dimension",
+        "required": True,
+        "data_type": "string",
+        "allows_nulls": False,
+        "value_format": None,
+        "generation_logic": "Static value like 'AWS Inc.' or randomly chosen from predefined issuer names.",
+    },
+    "ListCost": {
+        "description": "Cost calculated by multiplying List Unit Price and the corresponding Pricing Quantity.",
+        "type": "metric",
+        "required": True,
+        "data_type": "decimal",
+        "allows_nulls": False,
+        "value_format": "Numeric Format",
+        "range": "Any valid decimal value",
+        "generation_logic": (
+            "Calculated as ListUnitPrice × PricingQuantity if ListUnitPrice is not null. "
+            "Defaults to BilledCost in other cases."
+        ),
+    },
+    "ListUnitPrice": {
+        "description": "The suggested provider-published unit price for a single Pricing Unit of the associated SKU.",
+        "type": "metric",
+        "required": False,
+        "data_type": "decimal",
+        "allows_nulls": True,
+        "value_format": "Numeric Format",
+        "range": "Any valid non-negative decimal value",
+        "generation_logic": (
+            "Random positive decimal for applicable ChargeCategory and ChargeClass combinations. "
+            "Null for ChargeCategory 'Tax' or in special cases."
+        ),
+    },
+
+
+
+
+
+
+
+
+
+
+
+
 }
 # Provide helper functions to retrieve metadata for validation or generation purposes.
 
