@@ -104,6 +104,40 @@ def generate_column_data(column_name, row_count, profile=None, pricing_quantity=
             (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
             for _ in range(row_count)
         ]
+    elif column_name == "PricingCategory":
+        return [
+            random.choice(["Standard", "Dynamic", "Committed", "Other"])
+            if charge_class != "Correction" and charge_category in ["Usage", "Purchase"]
+            else None
+            for charge_class, charge_category in zip(
+                generate_column_data("ChargeClass", row_count),
+                generate_column_data("ChargeCategory", row_count)
+            )
+        ]
+    elif column_name == "PricingQuantity":
+        return [
+            round(random.uniform(1.0, 100.0), 2)
+            if charge_class != "Correction" and charge_category in ["Usage", "Purchase"]
+            else None
+            for charge_class, charge_category in zip(
+                generate_column_data("ChargeClass", row_count),
+                generate_column_data("ChargeCategory", row_count)
+            )
+        ]
+    elif column_name == "PricingUnit":
+        return [
+            random.choice(["Hours", "GB-Hours", "Requests", "Transactions"])
+            if charge_class != "Correction" and charge_category in ["Usage", "Purchase"]
+            else None
+            for charge_class, charge_category in zip(
+                generate_column_data("ChargeClass", row_count),
+                generate_column_data("ChargeCategory", row_count)
+            )
+        ]
+
+
+
+
     return [None] * row_count
 
 # Generate synthetic data for the FOCUS dataset
@@ -157,6 +191,10 @@ def generate_focus_data(row_count=20, distribution="Evenly Distributed", profile
         "InvoiceIssuerName": generate_column_data("InvoiceIssuerName", row_count),
         "ListCost": generate_column_data("ListCost", row_count, pricing_quantity=pricing_quantity),
         "ListUnitPrice": generate_column_data("ListUnitPrice", row_count),
+        "PricingCategory": generate_column_data("PricingCategory", row_count),
+        "PricingQuantity": generate_column_data("PricingQuantity", row_count),
+        "PricingUnit": generate_column_data("PricingUnit", row_count),
+
     }
 
     return pd.DataFrame(data, columns=FOCUS_METADATA.keys())

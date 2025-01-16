@@ -301,6 +301,48 @@ FOCUS_METADATA = {
             "Null for ChargeCategory 'Tax' or in special cases."
         ),
     },
+    "PricingCategory": {
+        "description": "Describes the pricing model used for a charge at the time of use or purchase.",
+        "type": "dimension",
+        "required": True,
+        "data_type": "string",
+        "allows_nulls": True,
+        "value_format": "Allowed values: Standard, Dynamic, Committed, Other",
+        "allowed_values": ["Standard", "Dynamic", "Committed", "Other"],
+        "generation_logic": (
+            "Random selection from allowed values when ChargeClass is not 'Correction' "
+            "and ChargeCategory is 'Usage' or 'Purchase'. Otherwise, null."
+        ),
+    },
+    "PricingQuantity": {
+        "description": "The volume of a given SKU associated with a resource or service used or purchased, based on the Pricing Unit.",
+        "type": "metric",
+        "required": True,
+        "data_type": "decimal",
+        "allows_nulls": True,
+        "value_format": "Numeric Format",
+        "range": "Any valid decimal value",
+        "generation_logic": (
+            "Random decimal value when ChargeClass is not 'Correction' and ChargeCategory is 'Usage' or 'Purchase'. "
+            "Otherwise, null."
+        ),
+    },
+    "PricingUnit": {
+        "description": (
+            "Provider-specified measurement unit for determining unit prices, indicating how the provider rates "
+            "measured usage and purchase quantities after applying pricing rules like block pricing."
+        ),
+        "type": "dimension",
+        "required": True,
+        "data_type": "string",
+        "allows_nulls": True,
+        "value_format": "Unit Format",
+        "generation_logic": (
+            "Random selection from ['Hours', 'GB-Hours', 'Requests', 'Transactions'] "
+            "when ChargeClass is not 'Correction' and ChargeCategory is 'Usage' or 'Purchase'. "
+            "Otherwise, null."
+        ),
+    },
 
 
 
