@@ -3,7 +3,9 @@ import pandas as pd
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
-from curGen import generate_focus_data  # Import the function from curGen.py
+
+from .curGen import generate_focus_data  # Import the function from curGen.py
+from .validate_cur import validate_focus_df  # Import your validator function
 
 app = FastAPI()
 
@@ -12,8 +14,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],  # Frontend origin
     allow_credentials=True,
-    allow_methods=["*"],  # Allow all HTTP methods
-    allow_headers=["*"],  # Allow all headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Predefined profiles and distributions
@@ -24,10 +26,6 @@ VALID_DISTRIBUTIONS = ["Evenly Distributed", "ML-Focused", "Data-Intensive", "Me
 async def generate_cur(request: Request):
     # Parse incoming request body
     body = await request.json()
-
-    # Log the raw request body (for debugging)
-    print(f"Raw request body: {body}")
-
     profile = body.get("profile", "").strip()
     distribution = body.get("distribution", "").strip()
     row_count = body.get("row_count", 20)
@@ -47,24 +45,36 @@ async def generate_cur(request: Request):
     print(f"Received distribution: {distribution}")
     print(f"Received row_count: {row_count}")
 
-    # Generate CUR data using curGen.py
-    df = generate_focus_data(row_count=row_count, distribution=distribution, profile=profile)
+    # 1. Generate the CUR data
+    df = generate_focus_data(row_count=row_count, profile=profile)
 
-    # Save the file locally
+    # 2. Validate the generated DataFrame
+    #    If it fails, raise an HTTPException for the pipeline or user to see
+    try:
+        validate_focus_df(df)
+    except ValueError as e:
+        # Validation failed; raise HTTP 500 or 422 depending on your preference
+        raise HTTPException(
+            status_code=500,
+            detail=f"Data validation failed: {str(e)}"
+        )
+
+    # 3. If validation passes, save the file
     filename = f"generated_CUR_{row_count}.csv"
     filepath = os.path.join("files", filename)
     os.makedirs("files", exist_ok=True)
     df.to_csv(filepath, index=False)
 
-    # Construct the absolute URL
+    # 4. Construct the absolute URL for the file
     base_url = request.base_url
     file_url = f"{base_url}files/{filename}"
 
-    # Return the file URL
-    return {"message": f"FOCUS-conformed CUR with {row_count} rows generated!", "url": file_url}
+    # Return success with the file URL
+    return {
+        "message": f"FOCUS-conformed CUR with {row_count} rows generated and validated!",
+        "url": file_url
+    }
 
-
-# Serve static files
 @app.get("/files/{filename}")
 async def get_file(filename: str):
     filepath = os.path.join("files", filename)

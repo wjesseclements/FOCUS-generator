@@ -172,5 +172,6 @@ cython_debug/
 
 
 backend/files/
+files/
 node_modules/
 .DS_Store

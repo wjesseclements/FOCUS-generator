@@ -1,212 +1,296 @@
-import pandas as pd
-import uuid
 import random
+import uuid
+import json
 from datetime import datetime, timezone, timedelta
-from focus_metadata import FOCUS_METADATA
 
-# Generate realistic AWS account numbers
-def generate_aws_account():
-    prefix = "999"  # Reserved prefix to avoid collisions with real AWS accounts
-    random_digits = random.randint(100000000, 999999999)
-    return f"{prefix}{random_digits}"
+import pandas as pd
+from .focus_metadata import FOCUS_METADATA
 
-# Helper function to generate data for a specific column
-def generate_column_data(column_name, row_count, profile=None, pricing_quantity=None):
-    metadata = FOCUS_METADATA.get(column_name)
-    if not metadata:
-        raise ValueError(f"Metadata for column '{column_name}' not found.")
+# Example: Weighted distributions for certain columns
+CHARGE_CATEGORY_WEIGHTS = {
+    "Usage": 0.7,
+    "Purchase": 0.15,
+    "Tax": 0.05,
+    "Credit": 0.05,
+    "Adjustment": 0.05,
+}
 
-    # Generate data based on column name
-    if column_name == "ContractedCost":
-        return [
-            round((contracted_unit_price * (quantity or 0)), 2) if contracted_unit_price else billed_cost
-            for contracted_unit_price, quantity, billed_cost in zip(
-                generate_column_data("ContractedUnitPrice", row_count),
-                pricing_quantity or [1] * row_count,
-                generate_column_data("BilledCost", row_count, profile)
-            )
-        ]
-    elif column_name == "ContractedUnitPrice":
-        return [
-            round(random.uniform(0.01, 10.0), 2) if random.random() > 0.2 else None
-            for _ in range(row_count)
-        ]
-    elif column_name == "EffectiveCost":
-        return [
-            round(billed_cost * random.uniform(0.8, 1.0), 2) if billed_cost is not None else None
-            for billed_cost in generate_column_data("BilledCost", row_count, profile)
-        ]
-    elif column_name == "InvoiceIssuerName":
-        return ["AWS Inc."] * row_count
-    elif column_name == "ListCost":
-        return [
-            round((list_unit_price * (quantity or 0)), 2) if list_unit_price else billed_cost
-            for list_unit_price, quantity, billed_cost in zip(
-                generate_column_data("ListUnitPrice", row_count),
-                pricing_quantity or [1] * row_count,
-                generate_column_data("BilledCost", row_count, profile)
-            )
-        ]
-    elif column_name == "ListUnitPrice":
-        return [
-            round(random.uniform(0.01, 15.0), 2) if random.random() > 0.2 else None
-            for _ in range(row_count)
-        ]
-    elif column_name == "BilledCost":
-        if profile == "Greenfield":
-            total_cost = random.uniform(20000, 50000)
-        elif profile == "Large Business":
-            total_cost = random.uniform(100000, 250000)
-        elif profile == "Enterprise":
-            total_cost = random.uniform(1000000, 2000000)
+SERVICE_CATEGORY_WEIGHTS = {
+    "Compute": 0.3,
+    "Storage": 0.2,
+    "Databases": 0.2,
+    "Networking": 0.1,
+    "AI and Machine Learning": 0.1,
+    "Other": 0.1,
+}
+
+# Example: T-shirt profile cost ranges (for distributing BilledCost)
+PROFILE_COST_RANGES = {
+    "Greenfield": (10_000, 50_000),
+    "Large Business": (100_000, 250_000),
+    "Enterprise": (500_000, 2_000_000),
+}
+
+def generate_profile_total_cost(profile):
+    """
+    Pick a random total cost for the entire dataset, based on the chosen profile.
+    """
+    min_val, max_val = PROFILE_COST_RANGES.get(profile, (50_000, 100_000))
+    return random.uniform(min_val, max_val)
+
+def distribute_billed_cost(row_idx, row_count, total_dataset_cost):
+    """
+    Distribute the dataset's total cost across rows in a naive way.
+    For the final row, we could adjust to ensure exact sum, but for now,
+    we'll just approximate by randomizing around a per-row average.
+    """
+    base_per_row = total_dataset_cost / row_count
+    # random factor of ±20%
+    factor = random.uniform(0.8, 1.2)
+    return round(base_per_row * factor, 2)
+
+def generate_value_for_column(col_name, row_idx, row_data, row_count, profile, total_dataset_cost):
+    """
+    Generates a single cell for a given column, referencing the FOCUS metadata
+    and optionally other already-generated columns in row_data.
+    """
+    meta = FOCUS_METADATA[col_name]
+    data_type = meta.get("data_type")
+    allows_null = meta.get("allows_nulls", True)
+    allowed_values = meta.get("allowed_values", None)
+    value_format = meta.get("value_format", None)
+
+    # --------------------------------------------------------------
+    # CUSTOM LOGIC FOR SELECT COLUMNS (examples)
+    # --------------------------------------------------------------
+    if col_name == "ChargeCategory":
+        # Weighted random choice
+        categories = list(CHARGE_CATEGORY_WEIGHTS.keys())
+        weights = list(CHARGE_CATEGORY_WEIGHTS.values())
+        return random.choices(categories, weights=weights, k=1)[0]
+
+    elif col_name == "BilledCost":
+        # Distribute total cost across rows
+        return distribute_billed_cost(row_idx, row_count, total_dataset_cost)
+
+    elif col_name == "BillingPeriodStart":
+        # Hard-code a monthly period start (Jan 1st)
+        return "2024-01-01T00:00:00Z"
+
+    elif col_name == "BillingPeriodEnd":
+        # Hard-code the monthly period end (Feb 1st)
+        return "2024-02-01T00:00:00Z"
+
+    elif col_name == "ChargePeriodStart":
+        # Example: each row is a daily usage period
+        start_dt = datetime(2024, 1, 1, tzinfo=timezone.utc) + timedelta(days=row_idx)
+        return start_dt.isoformat()
+
+    elif col_name == "ChargePeriodEnd":
+        # 1 day after ChargePeriodStart
+        cps_str = row_data.get("ChargePeriodStart")
+        if cps_str:
+            start_dt = datetime.fromisoformat(cps_str)
+            end_dt = start_dt + timedelta(days=1)
+            return end_dt.isoformat()
+        # fallback
+        return "2024-01-02T00:00:00+00:00"
+
+    elif col_name == "ServiceCategory":
+        # Weighted random choice for demonstration
+        cats = list(SERVICE_CATEGORY_WEIGHTS.keys())
+        wts = list(SERVICE_CATEGORY_WEIGHTS.values())
+        return random.choices(cats, weights=wts, k=1)[0]
+
+    elif col_name == "PricingUnit":
+        # Example cross-logic: if ChargeCategory is "Usage" or "Purchase", pick a random unit
+        charge_cat = row_data.get("ChargeCategory")
+        if charge_cat in ["Usage", "Purchase"]:
+            # skip random null chance
+            return random.choice(["Hours", "GB-Hours", "Requests", "Transactions"])
         else:
-            total_cost = 100000  # Default for testing
-        return [round(total_cost / row_count, 2) for _ in range(row_count)]
-    elif column_name == "BillingCurrency":
-        return ["USD"] * row_count  # Default to "USD" for now.
-    elif column_name == "BillingPeriodStart":
-        return [
-            (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
-            for _ in range(row_count)
+            # null otherwise
+            return None
+
+    elif col_name == "SkuId":
+        # If ChargeCategory = "Tax", must be null, else random ID
+        cc = row_data.get("ChargeCategory")
+        if cc == "Tax":
+            return None
+        # Return a random "SKU-xxxx"
+        return f"SKU-{uuid.uuid4().hex[:4]}"
+
+    elif col_name == "SkuPriceId":
+        # Same logic: if ChargeCategory = "Tax", must be null
+        cc = row_data.get("ChargeCategory")
+        if cc == "Tax":
+            return None
+        return f"SKUPRICE-{uuid.uuid4().hex[:4]}"
+
+    elif col_name == "CapacityReservationId":
+        # e.g. 30% chance to have a reservation
+        if random.random() < 0.3:
+            return f"CapRes-{uuid.uuid4().hex[:4]}"
+        else:
+            return None
+
+    elif col_name == "CapacityReservationStatus":
+        cid = row_data.get("CapacityReservationId")
+        if cid is not None:
+            return random.choice(["Used", "Unused"])
+        else:
+            return None
+
+    elif col_name == "CommitmentDiscountId":
+        # 20% chance to have an ID
+        if random.random() < 0.2:
+            return f"CD-{uuid.uuid4().hex[:4]}"
+        else:
+            return None
+
+    elif col_name == "CommitmentDiscountStatus":
+        # If ID != null and ChargeCategory=Usage => pick "Used"/"Unused"
+        cdid = row_data.get("CommitmentDiscountId")
+        ccat = row_data.get("ChargeCategory")
+        if cdid is not None and ccat == "Usage":
+            return random.choice(["Used", "Unused"])
+        else:
+            return None
+
+    elif col_name == "CommitmentDiscountCategory":
+        cdid = row_data.get("CommitmentDiscountId")
+        if cdid is not None:
+            return random.choice(["Spend", "Usage"])
+        return None
+
+    elif col_name == "CommitmentDiscountQuantity":
+        cdid = row_data.get("CommitmentDiscountId")
+        ccat = row_data.get("ChargeCategory")
+        if cdid is not None and ccat == "Usage":
+            return round(random.uniform(1, 50), 2)
+        return None
+
+    elif col_name == "CommitmentDiscountType":
+        cdid = row_data.get("CommitmentDiscountId")
+        if cdid is not None:
+            return random.choice(["Reserved", "SavingsPlan", "Custom"])
+        return None
+
+    elif col_name == "CommitmentDiscountUnit":
+        cdid = row_data.get("CommitmentDiscountId")
+        if cdid is not None:
+            # could be "Hours", "GB", etc.
+            return random.choice(["Hours", "GB", "Requests"])
+        return None
+
+    elif col_name == "ChargeFrequency":
+        # If ChargeCategory = "Purchase", avoid "Usage-Based"
+        ccat = row_data.get("ChargeCategory")
+        if ccat == "Purchase":
+            return random.choice(["One-Time", "Recurring"])
+        else:
+            # For other categories, we can pick from all three
+            return random.choice(["One-Time", "Recurring", "Usage-Based"])
+
+
+
+
+
+    # --------------------------------------------------------------
+    # FALLBACK: Generic logic if no special-case logic
+    # --------------------------------------------------------------
+    return generate_generic_value(col_name, meta, row_idx, row_data)
+
+def generate_generic_value(col_name, meta, row_idx, row_data):
+    """
+    A generic fallback approach for columns that don't have
+    special logic above.
+    """
+    data_type = meta.get("data_type")
+    allows_null = meta.get("allows_nulls", True)
+    allowed_values = meta.get("allowed_values", None)
+
+    # 10% chance of null if allowed
+    if allows_null and random.random() < 0.1:
+        return None
+
+    # If we have a set of allowed_values for a dimension
+    if allowed_values and data_type == "string":
+        return random.choice(allowed_values)
+
+    if data_type in ("decimal", "numeric"):
+        # Return a random float in some range
+        return round(random.uniform(1.0, 500.0), 2)
+
+    if data_type == "datetime":
+        # Simplistic datetime
+        return "2024-01-01T00:00:00Z"
+
+    if data_type == "json":
+        # Example
+        return {"exampleKey": "exampleValue"}
+
+    # string fallback
+    if data_type == "string":
+        return f"{col_name}_{row_idx}_{uuid.uuid4().hex[:4]}"
+
+    # If nothing else matched
+    return None
+
+def post_process(df):
+    """
+    Optional: Second pass to correct or enforce cross-column constraints
+    that are easier to fix after the entire row is generated.
+    For example:
+     - If CommitmentDiscountId is null, set CommitmentDiscountName, etc. to null.
+     - If ChargeCategory=Tax, ensure SkuPriceId is null, etc. (We've done some inline, but you can also do it here.)
+    """
+    # Example: If CommitmentDiscountId is null, null out discount fields
+    if "CommitmentDiscountId" in df.columns:
+        mask_null_cd = df["CommitmentDiscountId"].isnull()
+        discount_cols = [
+            "CommitmentDiscountName", "CommitmentDiscountStatus",
+            "CommitmentDiscountQuantity", "CommitmentDiscountUnit",
+            "CommitmentDiscountType", "CommitmentDiscountCategory"
         ]
-    elif column_name == "BillingPeriodEnd":
-        return [
-            datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-            for _ in range(row_count)
-        ]
-    elif column_name == "ChargeCategory":
-        return random.choices(
-            ["Usage", "Purchase", "Tax", "Credit", "Adjustment"], k=row_count
-        )
-    elif column_name == "ChargeClass":
-        return [
-            "Correction" if random.random() > 0.5 else None
-            for _ in range(row_count)
-        ]
-    elif column_name == "ChargeDescription":
-        return [
-            f"Charge description {i}" if random.random() > 0.1 else None
-            for i in range(row_count)
-        ]
-    elif column_name == "ChargeFrequency":
-        return [
-            random.choice(["One-Time", "Recurring", "Usage-Based"])
-            if charge_category != "Purchase" else random.choice(["One-Time", "Recurring"])
-            for charge_category in generate_column_data("ChargeCategory", row_count)
-        ]
-    elif column_name == "ChargePeriodEnd":
-        return [
-            datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-            for _ in range(row_count)
-        ]
-    elif column_name == "ChargePeriodStart":
-        return [
-            (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
-            for _ in range(row_count)
-        ]
-    elif column_name == "PricingCategory":
-        return [
-            random.choice(["Standard", "Dynamic", "Committed", "Other"])
-            if charge_class != "Correction" and charge_category in ["Usage", "Purchase"]
-            else None
-            for charge_class, charge_category in zip(
-                generate_column_data("ChargeClass", row_count),
-                generate_column_data("ChargeCategory", row_count)
+        for ccol in discount_cols:
+            if ccol in df.columns:
+                df.loc[mask_null_cd, ccol] = None
+
+    return df
+
+
+def generate_focus_data(row_count=10, profile="Greenfield"):
+    """
+    Generates a synthetic FOCUS dataset with refined logic for certain columns.
+    """
+    # Step 1: Pick a total cost once for the entire dataset
+    total_cost = generate_profile_total_cost(profile)
+    columns_in_order = list(FOCUS_METADATA.keys())  # or define a custom order
+
+    rows = []
+    for i in range(row_count):
+        row_data = {}
+        for col_name in columns_in_order:
+            val = generate_value_for_column(
+                col_name=col_name,
+                row_idx=i,
+                row_data=row_data,
+                row_count=row_count,
+                profile=profile,
+                total_dataset_cost=total_cost
             )
-        ]
-    elif column_name == "PricingQuantity":
-        return [
-            round(random.uniform(1.0, 100.0), 2)
-            if charge_class != "Correction" and charge_category in ["Usage", "Purchase"]
-            else None
-            for charge_class, charge_category in zip(
-                generate_column_data("ChargeClass", row_count),
-                generate_column_data("ChargeCategory", row_count)
-            )
-        ]
-    elif column_name == "PricingUnit":
-        return [
-            random.choice(["Hours", "GB-Hours", "Requests", "Transactions"])
-            if charge_class != "Correction" and charge_category in ["Usage", "Purchase"]
-            else None
-            for charge_class, charge_category in zip(
-                generate_column_data("ChargeClass", row_count),
-                generate_column_data("ChargeCategory", row_count)
-            )
-        ]
+            row_data[col_name] = val
+        rows.append(row_data)
+
+    df = pd.DataFrame(rows, columns=columns_in_order)
+
+    # Step 2: Post-processing to fix cross-column constraints (optional)
+    df = post_process(df)
+    return df
 
 
-
-
-    return [None] * row_count
-
-# Generate synthetic data for the FOCUS dataset
-def generate_focus_data(row_count=20, distribution="Evenly Distributed", profile="Greenfield"):
-    current_time = datetime.now(timezone.utc)
-
-    # Generate pricing quantity for applicable calculations
-    pricing_quantity = [random.uniform(1, 100) for _ in range(row_count)]
-
-    data = {
-        "InvoiceId": [str(uuid.uuid4()) for _ in range(row_count)],
-        "LinkedAccountId": [generate_aws_account() for _ in range(row_count)],
-        "UsageAccountId": [generate_aws_account() for _ in range(row_count)],
-        "UsageStartDate": [
-            (current_time - timedelta(hours=i)).strftime("%Y-%m-%dT%H:%M:%SZ")
-            for i in range(row_count)
-        ],
-        "UsageEndDate": [
-            (current_time - timedelta(hours=i - 1)).strftime("%Y-%m-%dT%H:%M:%SZ")
-            for i in range(row_count)
-        ],
-        "AvailabilityZone": generate_column_data("AvailabilityZone", row_count),
-        "BilledCost": generate_column_data("BilledCost", row_count, profile=profile),
-        "BillingAccountId": [str(uuid.uuid4()) for _ in range(row_count)],
-        "BillingAccountName": [
-            f"Account-{i}" if random.random() > 0.2 else None for i in range(row_count)
-        ],
-        "BillingCurrency": generate_column_data("BillingCurrency", row_count),
-        "BillingPeriodStart": generate_column_data("BillingPeriodStart", row_count),
-        "BillingPeriodEnd": generate_column_data("BillingPeriodEnd", row_count),
-        "CapacityReservationId": generate_column_data("CapacityReservationId", row_count),
-        "CapacityReservationStatus": generate_column_data("CapacityReservationStatus", row_count),
-        "ChargeCategory": generate_column_data("ChargeCategory", row_count),
-        "ChargeClass": generate_column_data("ChargeClass", row_count),
-        "ChargeDescription": generate_column_data("ChargeDescription", row_count),
-        "ChargeFrequency": generate_column_data("ChargeFrequency", row_count),
-        "ChargePeriodEnd": generate_column_data("ChargePeriodEnd", row_count),
-        "ChargePeriodStart": generate_column_data("ChargePeriodStart", row_count),
-        "CommitmentDiscountCategory": generate_column_data("CommitmentDiscountCategory", row_count),
-        "CommitmentDiscountId": generate_column_data("CommitmentDiscountId", row_count),
-        "CommitmentDiscountName": generate_column_data("CommitmentDiscountName", row_count),
-        "CommitmentDiscountQuantity": generate_column_data("CommitmentDiscountQuantity", row_count),
-        "CommitmentDiscountStatus": generate_column_data("CommitmentDiscountStatus", row_count),
-        "CommitmentDiscountType": generate_column_data("CommitmentDiscountType", row_count),
-        "CommitmentDiscountUnit": generate_column_data("CommitmentDiscountUnit", row_count),
-        "ConsumedQuantity": pricing_quantity,
-        "ConsumedUnit": random.choices(["Hours", "Requests", "GB", "Transactions"], k=row_count),
-        "ContractedCost": generate_column_data("ContractedCost", row_count, pricing_quantity=pricing_quantity),
-        "ContractedUnitPrice": generate_column_data("ContractedUnitPrice", row_count),
-        "EffectiveCost": generate_column_data("EffectiveCost", row_count),
-        "InvoiceIssuerName": generate_column_data("InvoiceIssuerName", row_count),
-        "ListCost": generate_column_data("ListCost", row_count, pricing_quantity=pricing_quantity),
-        "ListUnitPrice": generate_column_data("ListUnitPrice", row_count),
-        "PricingCategory": generate_column_data("PricingCategory", row_count),
-        "PricingQuantity": generate_column_data("PricingQuantity", row_count),
-        "PricingUnit": generate_column_data("PricingUnit", row_count),
-
-    }
-
-    return pd.DataFrame(data, columns=FOCUS_METADATA.keys())
-
-# Generate and save synthetic CUR for standalone testing
 if __name__ == "__main__":
-    profiles = ["Greenfield", "Large Business", "Enterprise"]
-    distribution = "Evenly Distributed"  # Use a fixed distribution for now
-    row_count = 20
-
-    for profile in profiles:
-        synthetic_cur = generate_focus_data(row_count, distribution=distribution, profile=profile)
-        output_file = f"synthetic_focus_cur_{profile.lower()}_v1_1.csv"
-        synthetic_cur.to_csv(output_file, index=False)
-        print(f"Synthetic CUR for profile '{profile}' saved as '{output_file}'.")
+    # Quick test
+    df_test = generate_focus_data(row_count=5, profile="Greenfield")
+    print(df_test.head())
