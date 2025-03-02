@@ -15,13 +15,98 @@ CHARGE_CATEGORY_WEIGHTS = {
     "Adjustment": 0.05,
 }
 
-SERVICE_CATEGORY_WEIGHTS = {
+# Default service category weights (Evenly Distributed)
+DEFAULT_SERVICE_CATEGORY_WEIGHTS = {
     "Compute": 0.3,
     "Storage": 0.2,
     "Databases": 0.2,
     "Networking": 0.1,
     "AI and Machine Learning": 0.1,
     "Other": 0.1,
+}
+
+# Distribution-specific service category weights
+DISTRIBUTION_SERVICE_WEIGHTS = {
+    "Evenly Distributed": DEFAULT_SERVICE_CATEGORY_WEIGHTS,
+    
+    "ML-Focused": {
+        "Compute": 0.25,
+        "Storage": 0.15,
+        "Databases": 0.15,
+        "Networking": 0.05,
+        "AI and Machine Learning": 0.35,
+        "Other": 0.05,
+    },
+    
+    "Data-Intensive": {
+        "Compute": 0.2,
+        "Storage": 0.35,
+        "Databases": 0.3,
+        "Networking": 0.05,
+        "AI and Machine Learning": 0.05,
+        "Other": 0.05,
+    },
+    
+    "Media-Intensive": {
+        "Compute": 0.15,
+        "Storage": 0.4,
+        "Databases": 0.1,
+        "Networking": 0.25,
+        "AI and Machine Learning": 0.05,
+        "Other": 0.05,
+    }
+}
+
+# SKU weights for different distributions
+DISTRIBUTION_SKU_WEIGHTS = {
+    "Evenly Distributed": {
+        "Compute": {
+            "Standard": 0.5,
+            "High-Memory": 0.25,
+            "High-CPU": 0.25
+        },
+        "Storage": {
+            "Standard": 0.6,
+            "High-Performance": 0.2,
+            "Archive": 0.2
+        }
+    },
+    "ML-Focused": {
+        "Compute": {
+            "Standard": 0.2,
+            "High-Memory": 0.3,
+            "High-CPU": 0.5
+        },
+        "Storage": {
+            "Standard": 0.4,
+            "High-Performance": 0.5,
+            "Archive": 0.1
+        }
+    },
+    "Data-Intensive": {
+        "Compute": {
+            "Standard": 0.3,
+            "High-Memory": 0.6,
+            "High-CPU": 0.1
+        },
+        "Storage": {
+            "Standard": 0.3,
+            "High-Performance": 0.6,
+            "Archive": 0.1
+        }
+    },
+    "Media-Intensive": {
+        "Compute": {
+            "Standard": 0.4,
+            "High-Memory": 0.2,
+            "High-CPU": 0.4
+        },
+        "Storage": {
+            "Standard": 0.2,
+            "High-Performance": 0.7,
+            "Archive": 0.1
+        }
+    }
 }
 
 # Example: T-shirt profile cost ranges (for distributing BilledCost)
@@ -49,10 +134,19 @@ def distribute_billed_cost(row_idx, row_count, total_dataset_cost):
     factor = random.uniform(0.8, 1.2)
     return round(base_per_row * factor, 2)
 
-def generate_value_for_column(col_name, row_idx, row_data, row_count, profile, total_dataset_cost):
+def generate_value_for_column(col_name, row_idx, row_data, row_count, profile, total_dataset_cost, distribution="Evenly Distributed"):
     """
     Generates a single cell for a given column, referencing the FOCUS metadata
     and optionally other already-generated columns in row_data.
+    
+    Args:
+        col_name: The name of the column to generate a value for
+        row_idx: The index of the current row
+        row_data: The data for the current row so far
+        row_count: The total number of rows to generate
+        profile: The profile to use (Greenfield, Large Business, Enterprise)
+        total_dataset_cost: The total cost for the dataset
+        distribution: The distribution to use (Evenly Distributed, ML-Focused, Data-Intensive, Media-Intensive)
     """
     meta = FOCUS_METADATA[col_name]
     data_type = meta.get("data_type")
@@ -97,9 +191,10 @@ def generate_value_for_column(col_name, row_idx, row_data, row_count, profile, t
         return "2024-01-02T00:00:00+00:00"
 
     elif col_name == "ServiceCategory":
-        # Weighted random choice for demonstration
-        cats = list(SERVICE_CATEGORY_WEIGHTS.keys())
-        wts = list(SERVICE_CATEGORY_WEIGHTS.values())
+        # Use distribution-specific weights
+        service_weights = DISTRIBUTION_SERVICE_WEIGHTS.get(distribution, DEFAULT_SERVICE_CATEGORY_WEIGHTS)
+        cats = list(service_weights.keys())
+        wts = list(service_weights.values())
         return random.choices(cats, weights=wts, k=1)[0]
 
     elif col_name == "PricingUnit":
@@ -259,14 +354,111 @@ def post_process(df):
 
     return df
 
+def apply_distribution_post_processing(df, distribution):
+    """
+    Apply distribution-specific post-processing to the generated data.
+    
+    Args:
+        df: The DataFrame to process
+        distribution: The distribution to apply
+        
+    Returns:
+        The processed DataFrame
+    """
+    if distribution == "ML-Focused":
+        # Increase costs for AI and ML services
+        if "ServiceCategory" in df.columns and "BilledCost" in df.columns:
+            ml_mask = df["ServiceCategory"] == "AI and Machine Learning"
+            df.loc[ml_mask, "BilledCost"] = df.loc[ml_mask, "BilledCost"] * random.uniform(1.2, 1.5)
+            
+            # Adjust EffectiveCost if present
+            if "EffectiveCost" in df.columns:
+                df.loc[ml_mask, "EffectiveCost"] = df.loc[ml_mask, "EffectiveCost"] * random.uniform(1.2, 1.5)
+        
+        # Add more GPU-related resources
+        if "ResourceType" in df.columns:
+            compute_mask = (df["ServiceCategory"] == "Compute") & df["ResourceType"].isnull()
+            gpu_types = ["GPU Instance", "GPU Accelerator", "ML Instance"]
+            df.loc[compute_mask, "ResourceType"] = df.loc[compute_mask].apply(
+                lambda _: random.choice(gpu_types) if random.random() < 0.4 else "Standard Instance", 
+                axis=1
+            )
+    
+    elif distribution == "Data-Intensive":
+        # Increase costs for Storage and Database services
+        if "ServiceCategory" in df.columns and "BilledCost" in df.columns:
+            data_mask = df["ServiceCategory"].isin(["Storage", "Databases"])
+            df.loc[data_mask, "BilledCost"] = df.loc[data_mask, "BilledCost"] * random.uniform(1.1, 1.4)
+            
+            # Adjust EffectiveCost if present
+            if "EffectiveCost" in df.columns:
+                df.loc[data_mask, "EffectiveCost"] = df.loc[data_mask, "EffectiveCost"] * random.uniform(1.1, 1.4)
+        
+        # Add more storage-related resources
+        if "ResourceType" in df.columns:
+            storage_mask = (df["ServiceCategory"] == "Storage") & df["ResourceType"].isnull()
+            storage_types = ["Block Storage", "Object Storage", "File Storage", "Archive Storage"]
+            df.loc[storage_mask, "ResourceType"] = df.loc[storage_mask].apply(
+                lambda _: random.choice(storage_types), 
+                axis=1
+            )
+    
+    elif distribution == "Media-Intensive":
+        # Increase costs for Storage and Networking services
+        if "ServiceCategory" in df.columns and "BilledCost" in df.columns:
+            media_mask = df["ServiceCategory"].isin(["Storage", "Networking"])
+            df.loc[media_mask, "BilledCost"] = df.loc[media_mask, "BilledCost"] * random.uniform(1.1, 1.3)
+            
+            # Adjust EffectiveCost if present
+            if "EffectiveCost" in df.columns:
+                df.loc[media_mask, "EffectiveCost"] = df.loc[media_mask, "EffectiveCost"] * random.uniform(1.1, 1.3)
+        
+        # Add more media-related resources
+        if "ResourceType" in df.columns:
+            compute_mask = (df["ServiceCategory"] == "Compute") & df["ResourceType"].isnull()
+            media_types = ["Media Transcoder", "Video Processing", "Content Delivery"]
+            df.loc[compute_mask, "ResourceType"] = df.loc[compute_mask].apply(
+                lambda _: random.choice(media_types) if random.random() < 0.3 else "Standard Instance", 
+                axis=1
+            )
+    
+    # Ensure BilledCost is rounded to 2 decimal places
+    if "BilledCost" in df.columns:
+        df["BilledCost"] = df["BilledCost"].round(2)
+    
+    # Ensure EffectiveCost is rounded to 2 decimal places
+    if "EffectiveCost" in df.columns:
+        df["EffectiveCost"] = df["EffectiveCost"].round(2)
+    
+    return df
 
-def generate_focus_data(row_count=10, profile="Greenfield"):
+
+def generate_focus_data(row_count=10, profile="Greenfield", distribution="Evenly Distributed"):
     """
     Generates a synthetic FOCUS dataset with refined logic for certain columns.
+    
+    Args:
+        row_count: The number of rows to generate
+        profile: The profile to use (Greenfield, Large Business, Enterprise)
+        distribution: The distribution to use (Evenly Distributed, ML-Focused, Data-Intensive, Media-Intensive)
+    
+    Returns:
+        A pandas DataFrame containing the generated data
     """
     # Step 1: Pick a total cost once for the entire dataset
     total_cost = generate_profile_total_cost(profile)
     columns_in_order = list(FOCUS_METADATA.keys())  # or define a custom order
+
+    # Apply distribution-specific adjustments to total cost
+    if distribution == "ML-Focused":
+        # ML workloads tend to be more expensive
+        total_cost *= random.uniform(1.1, 1.3)
+    elif distribution == "Data-Intensive":
+        # Data storage can be expensive at scale
+        total_cost *= random.uniform(1.05, 1.2)
+    elif distribution == "Media-Intensive":
+        # Media processing can be expensive
+        total_cost *= random.uniform(1.1, 1.25)
 
     rows = []
     for i in range(row_count):
@@ -278,7 +470,8 @@ def generate_focus_data(row_count=10, profile="Greenfield"):
                 row_data=row_data,
                 row_count=row_count,
                 profile=profile,
-                total_dataset_cost=total_cost
+                total_dataset_cost=total_cost,
+                distribution=distribution
             )
             row_data[col_name] = val
         rows.append(row_data)
@@ -287,6 +480,10 @@ def generate_focus_data(row_count=10, profile="Greenfield"):
 
     # Step 2: Post-processing to fix cross-column constraints (optional)
     df = post_process(df)
+    
+    # Step 3: Apply distribution-specific post-processing
+    df = apply_distribution_post_processing(df, distribution)
+    
     return df
 
 

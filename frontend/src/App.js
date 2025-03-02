@@ -6,27 +6,44 @@ import "tippy.js/dist/tippy.css"; // Tippy's default styles
 export default function App() {
   const [selectedProfile, setSelectedProfile] = useState(""); // No default selection
   const [distribution, setDistribution] = useState(""); // No default selection
+  const [rowCount, setRowCount] = useState(20); // Default to 20 rows
   const [response, setResponse] = useState(null); // Stores the response
   const [isReset, setIsReset] = useState(false); // Tracks whether the button is in "Reset" mode
+  const [isLoading, setIsLoading] = useState(false); // Tracks loading state
 
   const generateCUR = async () => {
     try {
+      setIsLoading(true);
       const res = await axios.post("http://127.0.0.1:8000/generate-cur", {
         profile: selectedProfile,
         distribution: distribution || "Evenly Distributed", // Default to "Evenly Distributed" if none selected
+        row_count: parseInt(rowCount, 10) // Convert to integer and send to API
       });
       setResponse(res.data);
       setIsReset(true); // Switch button to Reset mode
+      setIsLoading(false);
     } catch (error) {
       console.error("Error generating CUR:", error);
+      setIsLoading(false);
+      alert("Error generating CUR. Please try again.");
     }
   };
 
   const resetSelections = () => {
     setSelectedProfile("");
     setDistribution("");
+    setRowCount(20); // Reset to default
     setResponse(null);
     setIsReset(false); // Revert button to Generate CUR mode
+  };
+  
+  // Handle row count change with validation
+  const handleRowCountChange = (e) => {
+    const value = e.target.value;
+    // Only allow positive integers
+    if (value === "" || /^[1-9][0-9]*$/.test(value)) {
+      setRowCount(value);
+    }
   };
 
   return (
@@ -101,32 +118,63 @@ export default function App() {
         </div>
       </div>
 
+      {/* Row Count Input */}
+      <div className="mb-6 text-center">
+        <p className="text-lg font-medium mb-4">Number of Rows to Generate:</p>
+        <div className="flex justify-center">
+          <Tippy content="Higher values will generate more data but may take longer to process" arrow={true}>
+            <div className="relative">
+              <input
+                type="number"
+                min="1"
+                max="1000"
+                value={rowCount}
+                onChange={handleRowCountChange}
+                className="w-32 px-4 py-2 rounded border border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                <span className="text-gray-500">rows</span>
+              </div>
+            </div>
+          </Tippy>
+        </div>
+        <p className="text-sm text-gray-600 mt-2">
+          Recommended: 20-100 rows for quick generation, 100-500 for more comprehensive data
+        </p>
+      </div>
+
       {/* Generate/Reset Button */}
       <div className="text-center">
         <button
           onClick={isReset ? resetSelections : generateCUR}
           className={`px-6 py-2 rounded shadow ${
-            isReset
+            isLoading
+              ? "bg-gray-500 text-white cursor-wait"
+              : isReset
               ? "bg-red-600 text-white hover:bg-red-700"
               : selectedProfile && distribution
               ? "bg-blue-600 text-white hover:bg-blue-700"
               : "bg-gray-400 text-gray-700 cursor-not-allowed"
           }`}
-          disabled={!selectedProfile || !distribution}
+          disabled={!selectedProfile || !distribution || isLoading}
         >
-          {isReset ? "Reset" : "Generate CUR"}
+          {isLoading ? "Generating..." : isReset ? "Reset" : "Generate CUR"}
         </button>
       </div>
 
       {/* Display Response */}
       {response && (
         <div className="mt-6 text-center">
+          <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded mb-4">
+            <p className="font-bold">Success!</p>
+            <p>{response.message}</p>
+          </div>
           <a
             href={response.url}
-            className="text-blue-700 underline"
+            className="text-blue-700 underline text-lg font-semibold hover:text-blue-900"
             download
           >
-            Download CUR
+            Download CUR ({rowCount} rows)
           </a>
         </div>
       )}

@@ -46,7 +46,7 @@ async def generate_cur(request: Request):
     print(f"Received row_count: {row_count}")
 
     # 1. Generate the CUR data
-    df = generate_focus_data(row_count=row_count, profile=profile)
+    df = generate_focus_data(row_count=row_count, profile=profile, distribution=distribution)
 
     # 2. Validate the generated DataFrame
     #    If it fails, raise an HTTPException for the pipeline or user to see
