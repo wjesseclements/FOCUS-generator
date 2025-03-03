@@ -1,0 +1,50 @@
+name: Deploy FOCUS Generator
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '19'
+      - run: cd frontend && npm install && npm run build
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1  # Change to your preferred region
+      - name: Deploy to S3
+        run: aws s3 sync frontend/build/ s3://your-bucket-name --delete
+  
+  deploy-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - run: pip install -r requirements.txt
+      - name: Package Lambda
+        run: |
+          mkdir -p lambda_package
+          cp -r backend/* lambda_package/
+          pip install -r requirements.txt -t lambda_package/
+          cd lambda_package && zip -r ../function.zip .
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1  # Change to your preferred region
+      - name: Deploy to Lambda
+        run: |
+          aws lambda update-function-code --function-name focus-generator \
+            --zip-file fileb://function.zip
