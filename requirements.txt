@@ -3,5 +3,6 @@ uuid
 datetime
 flake8
 pytest
+fastapi
 mangum
 boto3
