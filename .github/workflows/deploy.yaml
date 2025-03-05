@@ -21,7 +21,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1  # Change to your preferred region
       - name: Deploy to S3
-        run: aws s3 sync frontend/build/ s3://your-bucket-name --delete
+        run: aws s3 sync frontend/build/ s3://cur-gen-bucket --delete
   
   deploy-backend:
     runs-on: ubuntu-latest
@@ -30,7 +30,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: '3.11'
       - run: pip install -r requirements.txt
       - name: Package Lambda
         run: |
@@ -46,5 +46,5 @@ jobs:
           aws-region: us-east-1  # Change to your preferred region
       - name: Deploy to Lambda
         run: |
-          aws lambda update-function-code --function-name focus-generator \
+          aws lambda update-function-code --function-name focus-generator-api \
             --zip-file fileb://function.zip
