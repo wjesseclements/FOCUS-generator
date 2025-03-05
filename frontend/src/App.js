@@ -14,7 +14,7 @@ export default function App() {
   const generateCUR = async () => {
     try {
       setIsLoading(true);
-      const res = await axios.post("http://127.0.0.1:8000/generate-cur", {
+      const res = await axios.post("https://n9vjtbenea.execute-api.us-east-1.amazonaws.com/prod/generate-cur", {
         profile: selectedProfile,
         distribution: distribution || "Evenly Distributed", // Default to "Evenly Distributed" if none selected
         row_count: parseInt(rowCount, 10) // Convert to integer and send to API

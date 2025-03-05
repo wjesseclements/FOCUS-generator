@@ -1,22 +1,28 @@
 import os
+import uuid
 import pandas as pd
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
+import boto3
 
-from .curGen import generate_focus_data  # Import the function from curGen.py
-from .validate_cur import validate_focus_df  # Import your validator function
+from .curGen import generate_focus_data
+from .validate_cur import validate_focus_df
 
 app = FastAPI()
 
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Frontend origin
+    allow_origins=["*"],  # Update this with your frontend domain in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# S3 client
+s3_client = boto3.client('s3')
+S3_BUCKET_NAME = os.environ.get('S3_BUCKET_NAME', 'cur-gen-files')  # Set this in Lambda environment variables
 
 # Predefined profiles and distributions
 VALID_PROFILES = ["Greenfield", "Large Business", "Enterprise"]
@@ -49,27 +55,41 @@ async def generate_cur(request: Request):
     df = generate_focus_data(row_count=row_count, profile=profile, distribution=distribution)
 
     # 2. Validate the generated DataFrame
-    #    If it fails, raise an HTTPException for the pipeline or user to see
     try:
         validate_focus_df(df)
     except ValueError as e:
-        # Validation failed; raise HTTP 500 or 422 depending on your preference
         raise HTTPException(
             status_code=500,
             detail=f"Data validation failed: {str(e)}"
         )
 
-    # 3. If validation passes, save the file
-    filename = f"generated_CUR_{row_count}.csv"
-    filepath = os.path.join("files", filename)
-    os.makedirs("files", exist_ok=True)
-    df.to_csv(filepath, index=False)
+    # 3. Save to CSV in memory
+    filename = f"generated_CUR_{row_count}_{uuid.uuid4().hex[:8]}.csv"
+    csv_data = df.to_csv(index=False)
+    
+    # 4. Upload to S3
+    try:
+        s3_client.put_object(
+            Bucket=S3_BUCKET_NAME,
+            Key=filename,
+            Body=csv_data,
+            ContentType='text/csv',
+            ACL='public-read'  # Make it publicly accessible
+        )
+        
+        # Generate a pre-signed URL (valid for 1 hour)
+        file_url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': S3_BUCKET_NAME, 'Key': filename},
+            ExpiresIn=3600
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to upload file to S3: {str(e)}"
+        )
 
-    # 4. Construct the absolute URL for the file
-    base_url = request.base_url
-    file_url = f"{base_url}files/{filename}"
-
-    # Return success with the file URL
+    # 5. Return success with the file URL
     return {
         "message": f"FOCUS-conformed CUR with {row_count} rows generated and validated!",
         "url": file_url
@@ -77,7 +97,13 @@ async def generate_cur(request: Request):
 
 @app.get("/files/{filename}")
 async def get_file(filename: str):
-    filepath = os.path.join("files", filename)
-    if not os.path.exists(filepath):
+    # For compatibility with old code, redirect to S3
+    try:
+        file_url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': S3_BUCKET_NAME, 'Key': filename},
+            ExpiresIn=3600
+        )
+        return RedirectResponse(url=file_url)
+    except Exception:
         raise HTTPException(status_code=404, detail="File not found.")
-    return FileResponse(filepath)

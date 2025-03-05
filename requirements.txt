@@ -3,3 +3,5 @@ uuid
 datetime
 flake8
 pytest
+mangum
+boto3
