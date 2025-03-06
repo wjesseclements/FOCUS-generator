@@ -63,7 +63,11 @@ jobs:
           # Update function code first
           aws lambda update-function-code --function-name focus-generator-api \
             --zip-file fileb://function.zip
-          
+
+          # Wait for the update to complete
+          echo "Waiting for function update to complete..."
+          sleep 10
+
           # Then attach the layer
           LAYER_ARN=$(aws lambda list-layer-versions --layer-name pandas-layer --query "LayerVersions[0].LayerVersionArn" --output text)
           aws lambda update-function-configuration --function-name focus-generator-api --layers $LAYER_ARN
