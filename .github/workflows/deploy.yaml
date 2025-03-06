@@ -1,9 +1,7 @@
 name: Deploy FOCUS Generator
-
 on:
   push:
     branches: [main]
-
 jobs:
   deploy-frontend:
     runs-on: ubuntu-latest
@@ -19,10 +17,9 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1  # Change to your preferred region
+          aws-region: us-east-1 # Change to your preferred region
       - name: Deploy to S3
         run: aws s3 sync frontend/build/ s3://cur-gen-bucket --delete
-  
   deploy-backend:
     runs-on: ubuntu-latest
     steps:
@@ -32,22 +29,41 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install -r requirements.txt
+      - name: Create Pandas Layer
+        run: |
+          mkdir -p layer/python
+          pip install pandas -t layer/python
+          cd layer && zip -r ../pandas_layer.zip python
       - name: Package Lambda
         run: |
-            mkdir -p lambda_package
-            # Copy all Python files directly into the root
-            cp backend/*.py lambda_package/
-            # Install dependencies
-            pip install --upgrade pip
-            pip install --target ./lambda_package boto3 mangum fastapi typing_extensions
-            cd lambda_package && zip -r ../function.zip .
+          mkdir -p lambda_package
+          # Copy all Python files directly into the root
+          cp backend/*.py lambda_package/
+          # Install dependencies
+          pip install --upgrade pip
+          pip install --target ./lambda_package boto3 mangum fastapi typing_extensions
+          cd lambda_package && zip -r ../function.zip .
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v1
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1  # Change to your preferred region
+          aws-region: us-east-1 # Change to your preferred region
+      - name: Deploy Pandas Layer
+        run: |
+          LAYER_VERSION=$(aws lambda publish-layer-version \
+            --layer-name pandas-layer \
+            --zip-file fileb://pandas_layer.zip \
+            --compatible-runtimes python3.11 \
+            --query 'LayerVersionArn' \
+            --output text)
+          echo "Created layer: $LAYER_VERSION"
       - name: Deploy to Lambda
         run: |
+          # Update function code first
           aws lambda update-function-code --function-name focus-generator-api \
             --zip-file fileb://function.zip
+          
+          # Then attach the layer
+          LAYER_ARN=$(aws lambda list-layer-versions --layer-name pandas-layer --query "LayerVersions[0].LayerVersionArn" --output text)
+          aws lambda update-function-configuration --function-name focus-generator-api --layers $LAYER_ARN
