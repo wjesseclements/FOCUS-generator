@@ -35,9 +35,11 @@ jobs:
       - name: Package Lambda
         run: |
             mkdir -p lambda_package
-            cp -r backend/*.py lambda_package/
+            # Copy all Python files directly into the root
+            cp backend/*.py lambda_package/
+            # Install dependencies
             pip install --upgrade pip
-            pip install --target ./lambda_package --platform manylinux2014_x86_64 --only-binary=:all: --implementation cp --python-version 3.11 boto3 mangum fastapi typing_extensions
+            pip install --target ./lambda_package boto3 mangum fastapi typing_extensions
             cd lambda_package && zip -r ../function.zip .
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v1
