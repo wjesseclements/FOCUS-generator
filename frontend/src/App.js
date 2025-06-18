@@ -3,6 +3,9 @@ import axios from "axios";
 import Tippy from "@tippyjs/react";
 import "tippy.js/dist/tippy.css"; // Tippy's default styles
 
+// Get API URL from environment variables
+const API_URL = process.env.REACT_APP_API_URL || "http://localhost:8000";
+
 export default function App() {
   const [selectedProfile, setSelectedProfile] = useState(""); // No default selection
   const [distribution, setDistribution] = useState(""); // No default selection
@@ -14,7 +17,7 @@ export default function App() {
   const generateCUR = async () => {
     try {
       setIsLoading(true);
-      const res = await axios.post("https://n9vjtbenea.execute-api.us-east-1.amazonaws.com/prod/generate-cur", {
+      const res = await axios.post(`${API_URL}/generate-cur`, {
         profile: selectedProfile,
         distribution: distribution || "Evenly Distributed", // Default to "Evenly Distributed" if none selected
         row_count: parseInt(rowCount, 10) // Convert to integer and send to API
@@ -25,7 +28,19 @@ export default function App() {
     } catch (error) {
       console.error("Error generating CUR:", error);
       setIsLoading(false);
-      alert("Error generating CUR. Please try again.");
+      
+      // More specific error handling
+      if (error.response) {
+        // Server responded with error status
+        const message = error.response.data?.detail || `Server error: ${error.response.status}`;
+        alert(`Error: ${message}`);
+      } else if (error.request) {
+        // Request was made but no response received
+        alert("Network error: Unable to connect to the server. Please check if the API is running.");
+      } else {
+        // Something else happened
+        alert("Error generating CUR. Please try again.");
+      }
     }
   };
 

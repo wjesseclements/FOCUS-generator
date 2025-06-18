@@ -1,32 +1,69 @@
-import os
 import uuid
+import logging
 import pandas as pd
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 import boto3
 
 from .curGen import generate_focus_data
 from .validate_cur import validate_focus_df
+from .config import get_settings
 
-app = FastAPI()
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
-# Add CORS middleware
+# Initialize settings
+settings = get_settings()
+
+app = FastAPI(
+    title="FOCUS CUR Generator API",
+    description="Generate synthetic FOCUS-compliant Cost and Usage Reports",
+    version="1.0.0",
+    debug=settings.debug
+)
+
+# Add CORS middleware with secure configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Update this with your frontend domain in production
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=settings.cors_origins_list,
+    allow_credentials=settings.cors_allow_credentials,
+    allow_methods=["GET", "POST"],  # Only allow specific methods
+    allow_headers=["Content-Type", "Authorization"],  # Only allow specific headers
 )
 
 # S3 client
 s3_client = boto3.client('s3')
-S3_BUCKET_NAME = os.environ.get('S3_BUCKET_NAME', 'cur-gen-files')  # Set this in Lambda environment variables
 
 # Predefined profiles and distributions
 VALID_PROFILES = ["Greenfield", "Large Business", "Enterprise"]
 VALID_DISTRIBUTIONS = ["Evenly Distributed", "ML-Focused", "Data-Intensive", "Media-Intensive"]
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint."""
+    return {
+        "status": "healthy",
+        "environment": settings.environment,
+        "version": "1.0.0"
+    }
+
+
+@app.get("/")
+async def root():
+    """Root endpoint with API information."""
+    return {
+        "message": "FOCUS CUR Generator API",
+        "version": "1.0.0",
+        "docs": "/docs",
+        "health": "/health"
+    }
+
 
 @app.post("/generate-cur")
 async def generate_cur(request: Request):
@@ -46,10 +83,8 @@ async def generate_cur(request: Request):
     except ValueError:
         raise HTTPException(status_code=400, detail="row_count must be an integer.")
 
-    # Log received data (for debugging)
-    print(f"Received profile: {profile}")
-    print(f"Received distribution: {distribution}")
-    print(f"Received row_count: {row_count}")
+    # Log received data
+    logger.info(f"Generate CUR request - Profile: {profile}, Distribution: {distribution}, Rows: {row_count}")
 
     # 1. Generate the CUR data
     df = generate_focus_data(row_count=row_count, profile=profile, distribution=distribution)
@@ -57,7 +92,9 @@ async def generate_cur(request: Request):
     # 2. Validate the generated DataFrame
     try:
         validate_focus_df(df)
+        logger.info(f"Data validation passed for {row_count} rows")
     except ValueError as e:
+        logger.error(f"Data validation failed: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail=f"Data validation failed: {str(e)}"
@@ -69,21 +106,29 @@ async def generate_cur(request: Request):
     
     # 4. Upload to S3
     try:
-        s3_client.put_object(
-            Bucket=S3_BUCKET_NAME,
-            Key=filename,
-            Body=csv_data,
-            ContentType='text/csv',
-            ACL='public-read'  # Make it publicly accessible
-        )
+        # Upload without public ACL for better security
+        put_object_params = {
+            'Bucket': settings.s3_bucket_name,
+            'Key': filename,
+            'Body': csv_data,
+            'ContentType': 'text/csv',
+        }
+        
+        # Only add public ACL if explicitly configured (not recommended for production)
+        if settings.s3_public_read:
+            put_object_params['ACL'] = 'public-read'
+        
+        s3_client.put_object(**put_object_params)
         
         # Generate a pre-signed URL (valid for 1 hour)
         file_url = s3_client.generate_presigned_url(
             'get_object',
-            Params={'Bucket': S3_BUCKET_NAME, 'Key': filename},
+            Params={'Bucket': settings.s3_bucket_name, 'Key': filename},
             ExpiresIn=3600
         )
+        logger.info(f"Successfully uploaded {filename} to S3 bucket {settings.s3_bucket_name}")
     except Exception as e:
+        logger.error(f"Failed to upload file to S3: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail=f"Failed to upload file to S3: {str(e)}"
@@ -101,7 +146,7 @@ async def get_file(filename: str):
     try:
         file_url = s3_client.generate_presigned_url(
             'get_object',
-            Params={'Bucket': S3_BUCKET_NAME, 'Key': filename},
+            Params={'Bucket': settings.s3_bucket_name, 'Key': filename},
             ExpiresIn=3600
         )
         return RedirectResponse(url=file_url)

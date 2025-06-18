@@ -1,9 +1,10 @@
 pandas
-uuid
-datetime
 flake8
 pytest
 fastapi
 mangum
 boto3
 httpx
+pydantic>=2.7.0
+pydantic-settings
+python-dotenv

@@ -9,9 +9,9 @@ from .curGen import (
     distribute_billed_cost,
     generate_profile_total_cost,
     post_process,
-    apply_distribution_post_processing,
-    DISTRIBUTION_SERVICE_WEIGHTS
+    apply_distribution_post_processing
 )
+from .column_generators import ServiceGenerator
 from .focus_metadata import FOCUS_METADATA
 
 # Set a fixed seed for reproducible tests
@@ -63,7 +63,8 @@ class TestGenerateFocusData:
             
             # With our mocked random.choices, the most common category should match
             # the highest weighted category in the distribution
-            expected_weights = DISTRIBUTION_SERVICE_WEIGHTS[distribution]
+            service_gen = ServiceGenerator()
+            expected_weights = service_gen.DISTRIBUTION_SERVICE_WEIGHTS[distribution]
             max_weight_category = max(expected_weights, key=expected_weights.get)
             
             # Count occurrences of each category
@@ -154,7 +155,8 @@ class TestGenerateValueForColumn:
             )
             
             # Get the category with the highest weight in this distribution
-            expected_weights = DISTRIBUTION_SERVICE_WEIGHTS[dist]
+            service_gen = ServiceGenerator()
+            expected_weights = service_gen.DISTRIBUTION_SERVICE_WEIGHTS[dist]
             max_weight_category = max(expected_weights, key=expected_weights.get)
             
             # With our mocked random.choices, the value should be the highest weighted category
