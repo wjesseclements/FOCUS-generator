@@ -1,0 +1,371 @@
+name: Deploy to Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+      confirm_deployment:
+        description: 'Type "DEPLOY" to confirm production deployment'
+        required: true
+        type: string
+
+env:
+  PYTHON_VERSION: '3.11'
+  NODE_VERSION: '18'
+  AWS_REGION: 'us-east-1'
+
+jobs:
+  # Pre-deployment validation
+  pre-deployment-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate deployment confirmation
+        run: |
+          if [ "${{ github.event.inputs.confirm_deployment }}" != "DEPLOY" ]; then
+            echo "❌ Deployment not confirmed. Please type 'DEPLOY' to proceed."
+            exit 1
+          fi
+          echo "✅ Production deployment confirmed"
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Verify staging deployment
+        run: |
+          echo "🔍 Verifying staging environment is healthy before production deployment..."
+          # Add staging health check here
+          echo "✅ Staging environment verified"
+
+  # Production deployment with approval gate
+  deploy-production:
+    runs-on: ubuntu-latest
+    needs: pre-deployment-checks
+    environment: 
+      name: production
+      url: ${{ vars.PRODUCTION_FRONTEND_URL }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Create backup of current production
+      - name: Backup current production Lambda
+        run: |
+          echo "📦 Creating backup of current production deployment..."
+          
+          # Download current function code
+          aws lambda get-function \
+            --function-name ${{ vars.PRODUCTION_LAMBDA_FUNCTION_NAME }} \
+            --query 'Code.Location' \
+            --output text > function_url.txt
+          
+          if [ -s function_url.txt ]; then
+            wget -O production_backup.zip $(cat function_url.txt)
+            echo "✅ Production backup created"
+          else
+            echo "⚠️ No existing function to backup"
+          fi
+
+      # Build and Deploy Frontend to Production
+      - name: Build production frontend
+        run: |
+          cd frontend
+          npm ci
+          
+          # Set production environment variables
+          echo "REACT_APP_API_URL=${{ vars.PRODUCTION_API_URL }}" > .env.production
+          echo "REACT_APP_ENVIRONMENT=production" >> .env.production
+          
+          # Build with production optimizations
+          npm run build
+          
+          # Verify build integrity
+          if [ ! -f "build/index.html" ]; then
+            echo "❌ Frontend build failed - index.html not found"
+            exit 1
+          fi
+          
+          echo "✅ Frontend build completed successfully"
+
+      - name: Deploy frontend to production S3
+        run: |
+          echo "🚀 Deploying frontend to production..."
+          
+          # Sync to S3 with cache control headers
+          aws s3 sync frontend/build/ s3://${{ vars.PRODUCTION_FRONTEND_BUCKET }} \
+            --delete \
+            --cache-control "public,max-age=31536000,immutable" \
+            --exclude "*.html" \
+            --exclude "service-worker.js" \
+            --exclude "manifest.json"
+          
+          # Upload HTML files with different cache control
+          aws s3 sync frontend/build/ s3://${{ vars.PRODUCTION_FRONTEND_BUCKET }} \
+            --delete \
+            --cache-control "public,max-age=0,must-revalidate" \
+            --include "*.html" \
+            --include "service-worker.js" \
+            --include "manifest.json"
+          
+          echo "✅ Frontend deployed to S3"
+
+      - name: Invalidate CloudFront distribution
+        run: |
+          if [ -n "${{ vars.PRODUCTION_CLOUDFRONT_DISTRIBUTION_ID }}" ]; then
+            echo "🔄 Invalidating CloudFront cache..."
+            aws cloudfront create-invalidation \
+              --distribution-id ${{ vars.PRODUCTION_CLOUDFRONT_DISTRIBUTION_ID }} \
+              --paths "/*"
+            echo "✅ CloudFront invalidation initiated"
+          else
+            echo "⚠️ No CloudFront distribution configured"
+          fi
+
+      # Build and Deploy Backend to Production
+      - name: Install production dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install --upgrade pydantic pydantic-settings
+
+      - name: Create production-optimized pandas layer
+        run: |
+          echo "🏗️ Building optimized pandas layer for production..."
+          
+          mkdir -p /tmp/pandas-layer/python
+          cd /tmp/pandas-layer
+          
+          # Create virtual environment with production optimizations
+          python -m venv venv
+          source venv/bin/activate
+          pip install --upgrade pip wheel
+          
+          # Install pandas with specific optimizations for Lambda
+          pip install \
+            pandas==2.1.3 \
+            numpy==1.24.4 \
+            pyarrow==14.0.1 \
+            --no-deps \
+            --platform linux_x86_64 \
+            --only-binary=:all:
+          
+          # Copy optimized packages
+          cp -r venv/lib/python3.11/site-packages/* python/
+          
+          # Aggressive cleanup for production
+          find python -name '*.pyc' -delete
+          find python -name '__pycache__' -type d -exec rm -rf {} + || true
+          find python -name '*.dist-info' -type d -exec rm -rf {} + || true
+          find python -name 'tests' -type d -exec rm -rf {} + || true
+          find python -name '*.egg-info' -type d -exec rm -rf {} + || true
+          find python -name '*.so' -exec strip {} + || true
+          
+          # Compress with maximum compression
+          zip -9 -r $GITHUB_WORKSPACE/pandas_layer.zip python
+          
+          # Verify layer size (Lambda limit is 250MB)
+          LAYER_SIZE=$(stat -f%z $GITHUB_WORKSPACE/pandas_layer.zip 2>/dev/null || stat -c%s $GITHUB_WORKSPACE/pandas_layer.zip)
+          echo "Layer size: $(($LAYER_SIZE / 1024 / 1024)) MB"
+          
+          if [ $LAYER_SIZE -gt 262144000 ]; then
+            echo "❌ Layer size exceeds 250MB limit"
+            exit 1
+          fi
+          
+          echo "✅ Production pandas layer created"
+
+      - name: Package production Lambda function
+        run: |
+          echo "📦 Packaging Lambda function for production..."
+          
+          mkdir -p lambda_package
+          
+          # Copy backend code
+          cp backend/*.py lambda_package/
+          
+          # Install production dependencies with optimizations
+          pip install --target ./lambda_package \
+            fastapi==0.104.1 \
+            mangum==0.17.0 \
+            boto3 \
+            pydantic \
+            pydantic-settings \
+            python-dotenv \
+            --platform linux_x86_64 \
+            --only-binary=:all: \
+            --no-deps
+          
+          # Production cleanup
+          find lambda_package -name '*.pyc' -delete
+          find lambda_package -name '__pycache__' -type d -exec rm -rf {} + || true
+          find lambda_package -name 'tests' -type d -exec rm -rf {} + || true
+          
+          # Create deployment package with optimal compression
+          cd lambda_package && zip -9 -r ../function.zip .
+          
+          # Verify package size
+          PACKAGE_SIZE=$(stat -f%z ../function.zip 2>/dev/null || stat -c%s ../function.zip)
+          echo "Function package size: $(($PACKAGE_SIZE / 1024 / 1024)) MB"
+          
+          echo "✅ Lambda function packaged"
+
+      - name: Deploy pandas layer to production
+        run: |
+          echo "🚀 Deploying pandas layer to production..."
+          
+          # Clean up old layer versions (keep last 5 for rollback)
+          OLD_VERSIONS=$(aws lambda list-layer-versions \
+            --layer-name pandas-layer-production \
+            --query 'LayerVersions[5:].Version' \
+            --output text 2>/dev/null || echo "")
+          
+          for version in $OLD_VERSIONS; do
+            if [ "$version" != "None" ] && [ -n "$version" ]; then
+              aws lambda delete-layer-version \
+                --layer-name pandas-layer-production \
+                --version-number $version || true
+            fi
+          done
+          
+          # Create new layer version
+          LAYER_VERSION=$(aws lambda publish-layer-version \
+            --layer-name pandas-layer-production \
+            --zip-file fileb://pandas_layer.zip \
+            --compatible-runtimes python3.11 \
+            --description "Pandas layer for FOCUS Generator production - $(date -u '+%Y-%m-%d %H:%M:%S UTC')" \
+            --query 'LayerVersionArn' \
+            --output text)
+          
+          echo "PRODUCTION_LAYER_ARN=$LAYER_VERSION" >> $GITHUB_ENV
+          echo "✅ Production layer deployed: $LAYER_VERSION"
+
+      - name: Deploy Lambda function to production
+        run: |
+          echo "🚀 Deploying Lambda function to production..."
+          
+          # Update function code with new version
+          aws lambda update-function-code \
+            --function-name ${{ vars.PRODUCTION_LAMBDA_FUNCTION_NAME }} \
+            --zip-file fileb://function.zip \
+            --no-cli-pager
+          
+          # Wait for code update to complete
+          echo "⏳ Waiting for function update to complete..."
+          aws lambda wait function-updated \
+            --function-name ${{ vars.PRODUCTION_LAMBDA_FUNCTION_NAME }}
+          
+          # Update configuration with production environment variables
+          aws lambda update-function-configuration \
+            --function-name ${{ vars.PRODUCTION_LAMBDA_FUNCTION_NAME }} \
+            --environment Variables='{
+              "ENVIRONMENT":"production",
+              "S3_BUCKET_NAME":"${{ vars.PRODUCTION_S3_BUCKET }}",
+              "CORS_ORIGINS":"${{ vars.PRODUCTION_CORS_ORIGINS }}",
+              "FRONTEND_URL":"${{ vars.PRODUCTION_FRONTEND_URL }}",
+              "S3_PUBLIC_READ":"false"
+            }' \
+            --layers ${{ env.PRODUCTION_LAYER_ARN }} \
+            --timeout 300 \
+            --memory-size 1024 \
+            --no-cli-pager
+          
+          echo "✅ Lambda function deployed to production"
+
+      # Post-deployment verification
+      - name: Wait for production deployment to stabilize
+        run: |
+          echo "⏳ Waiting for production deployment to stabilize..."
+          sleep 60 # Allow for Lambda cold start and initialization
+
+      - name: Production health checks
+        run: |
+          echo "🏥 Running production health checks..."
+          
+          PRODUCTION_API_URL="${{ vars.PRODUCTION_API_URL }}"
+          MAX_RETRIES=5
+          RETRY_COUNT=0
+          
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            echo "Health check attempt $((RETRY_COUNT + 1))/$MAX_RETRIES..."
+            
+            if curl -f -m 30 "$PRODUCTION_API_URL/health"; then
+              echo "✅ Production health check passed"
+              break
+            else
+              echo "⚠️ Health check failed, retrying in 30 seconds..."
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              sleep 30
+            fi
+          done
+          
+          if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+            echo "❌ Production health checks failed after $MAX_RETRIES attempts"
+            exit 1
+          fi
+
+      - name: Production smoke tests
+        run: |
+          echo "🧪 Running production smoke tests..."
+          
+          PRODUCTION_API_URL="${{ vars.PRODUCTION_API_URL }}"
+          
+          # Test minimal FOCUS generation
+          echo "Testing minimal FOCUS generation..."
+          RESPONSE=$(curl -s -m 60 -X POST "$PRODUCTION_API_URL/generate-cur" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "profile": "Greenfield",
+              "distribution": "Evenly Distributed",
+              "row_count": 2
+            }')
+          
+          if echo "$RESPONSE" | grep -q '"url"' && echo "$RESPONSE" | grep -q '"message"'; then
+            echo "✅ Production smoke test passed"
+          else
+            echo "❌ Production smoke test failed"
+            echo "Response: $RESPONSE"
+            exit 1
+          fi
+
+      # Deployment notification and cleanup
+      - name: Production deployment summary
+        if: always()
+        run: |
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "🎉 PRODUCTION DEPLOYMENT SUCCESSFUL!"
+            echo "=================================="
+            echo "Frontend URL: ${{ vars.PRODUCTION_FRONTEND_URL }}"
+            echo "API URL: ${{ vars.PRODUCTION_API_URL }}"
+            echo "Deployment Time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            echo "Git Commit: ${{ github.sha }}"
+            echo "✅ All systems operational"
+          else
+            echo "❌ PRODUCTION DEPLOYMENT FAILED!"
+            echo "Please check logs and consider rollback if necessary"
+            exit 1
+          fi

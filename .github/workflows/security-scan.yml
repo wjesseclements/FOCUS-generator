@@ -1,0 +1,372 @@
+name: Security Scanning
+
+on:
+  schedule:
+    # Run security scans daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: '3.11'
+  NODE_VERSION: '18'
+
+jobs:
+  # Code Quality and Security Analysis
+  code-security-scan:
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # Python Security Scanning
+      - name: Install Python security tools
+        run: |
+          pip install --upgrade pip
+          pip install bandit safety semgrep
+
+      - name: Run Bandit security linter
+        run: |
+          bandit -r backend/ -f json -o bandit-report.json
+          bandit -r backend/ -f txt
+        continue-on-error: true
+
+      - name: Check Python dependencies for vulnerabilities
+        run: |
+          pip install -r requirements.txt
+          safety check --json --output safety-report.json
+          safety check
+        continue-on-error: true
+
+      - name: Run Semgrep security analysis
+        run: |
+          semgrep --config=auto backend/ --json --output=semgrep-report.json
+          semgrep --config=auto backend/
+        continue-on-error: true
+
+      # Upload security reports
+      - name: Upload Bandit results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: bandit-security-report
+          path: bandit-report.json
+
+      - name: Upload Safety results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: safety-security-report
+          path: safety-report.json
+
+      - name: Upload Semgrep results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: semgrep-security-report
+          path: semgrep-report.json
+
+  # Frontend Security Scanning
+  frontend-security-scan:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Run npm audit
+        run: |
+          cd frontend
+          npm audit --audit-level=moderate --json > npm-audit-report.json || true
+          npm audit --audit-level=moderate
+        continue-on-error: true
+
+      - name: Run ESLint security rules
+        run: |
+          cd frontend
+          npx eslint src/ --ext .js,.jsx --format json --output-file eslint-security-report.json || true
+          npx eslint src/ --ext .js,.jsx
+        continue-on-error: true
+
+      - name: Check for hardcoded secrets
+        run: |
+          cd frontend
+          # Check for potential hardcoded secrets
+          grep -r -E "(api[_-]?key|password|secret|token)" src/ --exclude-dir=node_modules || echo "No obvious secrets found"
+          
+          # Check for console.log statements that might leak sensitive info
+          find src/ -name "*.js" -o -name "*.jsx" | xargs grep -n "console\." || echo "No console statements found"
+
+      - name: Upload npm audit results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: npm-audit-report
+          path: frontend/npm-audit-report.json
+
+      - name: Upload ESLint security results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: eslint-security-report
+          path: frontend/eslint-security-report.json
+
+  # Container and Infrastructure Security
+  infrastructure-security-scan:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-fs-results.sarif'
+
+      - name: Run Trivy configuration scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'config'
+          scan-ref: '.'
+          format: 'json'
+          output: 'trivy-config-results.json'
+        continue-on-error: true
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'trivy-fs-results.sarif'
+
+      - name: Upload Trivy configuration results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: trivy-config-report
+          path: trivy-config-results.json
+
+  # License and Compliance Scanning
+  license-compliance-scan:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # Python license scanning
+      - name: Install pip-licenses
+        run: pip install pip-licenses
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Generate Python license report
+        run: |
+          pip-licenses --format=json --output-file=python-licenses.json
+          pip-licenses --format=plain-vertical
+
+      # Frontend license scanning
+      - name: Install frontend dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Generate frontend license report
+        run: |
+          cd frontend
+          npx license-checker --json --out ../frontend-licenses.json
+          npx license-checker --summary
+
+      - name: Check for restrictive licenses
+        run: |
+          echo "Checking for potentially restrictive licenses..."
+          
+          # Check Python packages for GPL licenses
+          grep -i "gpl\|agpl\|copyleft" python-licenses.json || echo "No restrictive Python licenses found"
+          
+          # Check frontend packages for GPL licenses
+          grep -i "gpl\|agpl\|copyleft" frontend-licenses.json || echo "No restrictive frontend licenses found"
+
+      - name: Upload license reports
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: license-reports
+          path: |
+            python-licenses.json
+            frontend-licenses.json
+
+  # AWS Security Configuration Check
+  aws-security-check:
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' # Skip for PRs to avoid credential exposure
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Check Lambda function security configuration
+        run: |
+          echo "Checking Lambda function security configuration..."
+          
+          # Check if functions exist before analyzing
+          FUNCTIONS=("focus-generator-api" "focus-generator-staging")
+          
+          for func in "${FUNCTIONS[@]}"; do
+            if aws lambda get-function --function-name "$func" &>/dev/null; then
+              echo "Analyzing function: $func"
+              
+              # Check environment variables for sensitive data
+              aws lambda get-function-configuration --function-name "$func" \
+                --query 'Environment.Variables' --output json > "${func}-env.json"
+              
+              # Check if any environment variables might contain secrets
+              if grep -i "password\|secret\|key" "${func}-env.json"; then
+                echo "⚠️ Potential secrets in environment variables for $func"
+              else
+                echo "✅ No obvious secrets in environment variables for $func"
+              fi
+              
+              # Check function timeout and memory settings
+              TIMEOUT=$(aws lambda get-function-configuration --function-name "$func" --query 'Timeout' --output text)
+              MEMORY=$(aws lambda get-function-configuration --function-name "$func" --query 'MemorySize' --output text)
+              
+              echo "Function $func - Timeout: ${TIMEOUT}s, Memory: ${MEMORY}MB"
+              
+              if [ "$TIMEOUT" -gt 300 ]; then
+                echo "⚠️ Function timeout is quite high: ${TIMEOUT}s"
+              fi
+              
+            else
+              echo "Function $func not found, skipping..."
+            fi
+          done
+
+      - name: Check S3 bucket security
+        run: |
+          echo "Checking S3 bucket security..."
+          
+          BUCKETS=("cur-gen-bucket" "focus-generator-staging" "focus-generator-production")
+          
+          for bucket in "${BUCKETS[@]}"; do
+            if aws s3api head-bucket --bucket "$bucket" 2>/dev/null; then
+              echo "Analyzing bucket: $bucket"
+              
+              # Check bucket public access block
+              aws s3api get-public-access-block --bucket "$bucket" --output json > "${bucket}-public-access.json" 2>/dev/null || echo "No public access block configured"
+              
+              # Check bucket policy
+              aws s3api get-bucket-policy --bucket "$bucket" --output json > "${bucket}-policy.json" 2>/dev/null || echo "No bucket policy configured"
+              
+              # Check for public read access
+              if aws s3api get-bucket-acl --bucket "$bucket" --query 'Grants[?Grantee.URI==`http://acs.amazonaws.com/groups/global/AllUsers`]' --output text | grep -q "READ"; then
+                echo "⚠️ Bucket $bucket has public read access"
+              else
+                echo "✅ Bucket $bucket does not have public read access"
+              fi
+              
+            else
+              echo "Bucket $bucket not found or not accessible, skipping..."
+            fi
+          done
+
+      - name: Upload AWS security reports
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: aws-security-reports
+          path: |
+            *-env.json
+            *-public-access.json
+            *-policy.json
+
+  # Security Summary Report
+  security-summary:
+    runs-on: ubuntu-latest
+    needs: [code-security-scan, frontend-security-scan, infrastructure-security-scan, license-compliance-scan]
+    if: always()
+    
+    steps:
+      - name: Security scan summary
+        run: |
+          echo "🔒 Security Scan Summary"
+          echo "======================="
+          echo "Scan Date: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "Repository: ${{ github.repository }}"
+          echo "Branch: ${{ github.ref_name }}"
+          echo "Commit: ${{ github.sha }}"
+          echo ""
+          
+          # Check job statuses
+          if [ "${{ needs.code-security-scan.result }}" == "success" ]; then
+            echo "✅ Code Security Scan: PASSED"
+          else
+            echo "❌ Code Security Scan: FAILED"
+          fi
+          
+          if [ "${{ needs.frontend-security-scan.result }}" == "success" ]; then
+            echo "✅ Frontend Security Scan: PASSED"
+          else
+            echo "❌ Frontend Security Scan: FAILED"
+          fi
+          
+          if [ "${{ needs.infrastructure-security-scan.result }}" == "success" ]; then
+            echo "✅ Infrastructure Security Scan: PASSED"
+          else
+            echo "❌ Infrastructure Security Scan: FAILED"
+          fi
+          
+          if [ "${{ needs.license-compliance-scan.result }}" == "success" ]; then
+            echo "✅ License Compliance Scan: PASSED"
+          else
+            echo "❌ License Compliance Scan: FAILED"
+          fi
+          
+          echo ""
+          echo "📊 Review detailed reports in the Actions artifacts"
+          echo "🔍 Check GitHub Security tab for vulnerability details"

@@ -1,0 +1,232 @@
+name: Deploy to Staging
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: '3.11'
+  NODE_VERSION: '18'
+  AWS_REGION: 'us-east-1'
+
+jobs:
+  deploy-staging:
+    runs-on: ubuntu-latest
+    environment: staging
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Build and Deploy Frontend
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm ci
+          # Set staging API URL
+          echo "REACT_APP_API_URL=${{ vars.STAGING_API_URL }}" > .env.production
+          echo "REACT_APP_ENVIRONMENT=staging" >> .env.production
+          npm run build
+
+      - name: Deploy frontend to staging S3
+        run: |
+          aws s3 sync frontend/build/ s3://${{ vars.STAGING_FRONTEND_BUCKET }} --delete
+          # Invalidate CloudFront cache if distribution exists
+          if aws cloudfront list-distributions --query "DistributionList.Items[?Comment=='${{ vars.STAGING_FRONTEND_BUCKET }}'].Id" --output text | grep -q .; then
+            DISTRIBUTION_ID=$(aws cloudfront list-distributions --query "DistributionList.Items[?Comment=='${{ vars.STAGING_FRONTEND_BUCKET }}'].Id" --output text)
+            aws cloudfront create-invalidation --distribution-id $DISTRIBUTION_ID --paths "/*"
+          fi
+
+      # Build and Deploy Backend
+      - name: Install backend dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Create optimized pandas layer for staging
+        run: |
+          mkdir -p /tmp/pandas-layer/python
+          cd /tmp/pandas-layer
+          
+          # Create virtual environment and install pandas with optimizations
+          python -m venv venv
+          source venv/bin/activate
+          pip install --upgrade pip
+          pip install pandas pyarrow numpy --no-deps --platform linux_x86_64 --only-binary=:all:
+          
+          # Copy site-packages optimized for Lambda
+          cp -r venv/lib/python3.11/site-packages/* python/
+          
+          # Remove unnecessary files to reduce layer size
+          find python -name '*.pyc' -delete
+          find python -name '__pycache__' -type d -exec rm -rf {} + || true
+          find python -name '*.dist-info' -type d -exec rm -rf {} + || true
+          find python -name 'tests' -type d -exec rm -rf {} + || true
+          
+          # Compress the layer
+          zip -r $GITHUB_WORKSPACE/pandas_layer.zip python
+
+      - name: Package Lambda function
+        run: |
+          mkdir -p lambda_package
+          
+          # Copy backend code
+          cp backend/*.py lambda_package/
+          
+          # Install runtime dependencies (excluding pandas which is in layer)
+          pip install --target ./lambda_package \
+            fastapi \
+            mangum \
+            boto3 \
+            pydantic \
+            pydantic-settings \
+            python-dotenv \
+            --platform linux_x86_64 \
+            --only-binary=:all:
+          
+          # Create deployment package
+          cd lambda_package && zip -r ../function.zip . -x "*.pyc" "__pycache__/*"
+
+      - name: Deploy pandas layer to staging
+        run: |
+          # Delete old layer versions to save space (keep last 3)
+          OLD_VERSIONS=$(aws lambda list-layer-versions --layer-name pandas-layer-staging --query 'LayerVersions[3:].Version' --output text)
+          for version in $OLD_VERSIONS; do
+            if [ "$version" != "None" ]; then
+              aws lambda delete-layer-version --layer-name pandas-layer-staging --version-number $version || true
+            fi
+          done
+          
+          # Create new layer version
+          LAYER_VERSION=$(aws lambda publish-layer-version \
+            --layer-name pandas-layer-staging \
+            --zip-file fileb://pandas_layer.zip \
+            --compatible-runtimes python3.11 \
+            --description "Pandas layer for FOCUS Generator staging - $(date)" \
+            --query 'LayerVersionArn' \
+            --output text)
+          echo "LAYER_ARN=$LAYER_VERSION" >> $GITHUB_ENV
+
+      - name: Deploy Lambda function to staging
+        run: |
+          # Update function code
+          aws lambda update-function-code \
+            --function-name ${{ vars.STAGING_LAMBDA_FUNCTION_NAME }} \
+            --zip-file fileb://function.zip \
+            --no-cli-pager
+
+          # Wait for update to complete
+          aws lambda wait function-updated \
+            --function-name ${{ vars.STAGING_LAMBDA_FUNCTION_NAME }}
+
+          # Update environment variables
+          aws lambda update-function-configuration \
+            --function-name ${{ vars.STAGING_LAMBDA_FUNCTION_NAME }} \
+            --environment Variables='{
+              "ENVIRONMENT":"staging",
+              "S3_BUCKET_NAME":"${{ vars.STAGING_S3_BUCKET }}",
+              "CORS_ORIGINS":"${{ vars.STAGING_CORS_ORIGINS }}",
+              "FRONTEND_URL":"${{ vars.STAGING_FRONTEND_URL }}",
+              "S3_PUBLIC_READ":"false"
+            }' \
+            --layers ${{ env.LAYER_ARN }} \
+            --no-cli-pager
+
+      # Post-deployment Testing
+      - name: Wait for deployment to be ready
+        run: |
+          sleep 30 # Give time for Lambda cold start
+
+      - name: Run staging health checks
+        run: |
+          # Test API health endpoint
+          STAGING_API_URL="${{ vars.STAGING_API_URL }}"
+          
+          echo "Testing health endpoint..."
+          curl -f "$STAGING_API_URL/health" || exit 1
+          
+          echo "Testing root endpoint..."
+          curl -f "$STAGING_API_URL/" || exit 1
+
+      - name: Run staging integration tests
+        run: |
+          STAGING_API_URL="${{ vars.STAGING_API_URL }}"
+          
+          echo "Testing FOCUS generation with minimal dataset..."
+          RESPONSE=$(curl -s -X POST "$STAGING_API_URL/generate-cur" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "profile": "Greenfield",
+              "distribution": "Evenly Distributed", 
+              "row_count": 5
+            }')
+          
+          echo "API Response: $RESPONSE"
+          
+          # Check if response contains expected fields
+          if echo "$RESPONSE" | grep -q '"message"' && echo "$RESPONSE" | grep -q '"url"'; then
+            echo "✅ Staging deployment successful!"
+          else
+            echo "❌ Staging deployment failed - Invalid API response"
+            exit 1
+          fi
+
+      - name: Run FOCUS validation test
+        run: |
+          STAGING_API_URL="${{ vars.STAGING_API_URL }}"
+          
+          echo "Testing FOCUS validation with multiple profiles..."
+          
+          for profile in "Greenfield" "Large Business" "Enterprise"; do
+            for distribution in "Evenly Distributed" "ML-Focused"; do
+              echo "Testing $profile with $distribution..."
+              
+              RESPONSE=$(curl -s -X POST "$STAGING_API_URL/generate-cur" \
+                -H "Content-Type: application/json" \
+                -d "{
+                  \"profile\": \"$profile\",
+                  \"distribution\": \"$distribution\",
+                  \"row_count\": 3
+                }")
+              
+              if ! echo "$RESPONSE" | grep -q '"url"'; then
+                echo "❌ Failed: $profile - $distribution"
+                echo "Response: $RESPONSE"
+                exit 1
+              fi
+            done
+          done
+          
+          echo "✅ All FOCUS validation tests passed!"
+
+      # Notification
+      - name: Notify deployment status
+        if: always()
+        run: |
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "🚀 Staging deployment completed successfully!"
+            echo "Frontend URL: ${{ vars.STAGING_FRONTEND_URL }}"
+            echo "API URL: ${{ vars.STAGING_API_URL }}"
+          else
+            echo "❌ Staging deployment failed!"
+          fi
