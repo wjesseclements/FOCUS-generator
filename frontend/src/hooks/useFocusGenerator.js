@@ -12,9 +12,14 @@ export const useFocusGenerator = () => {
   const [isReset, setIsReset] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
-  const generateCUR = async () => {
+  const generateCUR = async (providers = []) => {
     if (!selectedProfile || !distribution) {
       toast.error("Please select both a profile and distribution");
+      return;
+    }
+    
+    if (providers.length === 0) {
+      toast.error("Please select at least one cloud provider");
       return;
     }
 
@@ -25,7 +30,8 @@ export const useFocusGenerator = () => {
       const res = await axios.post(`${API_URL}/generate-cur`, {
         profile: selectedProfile,
         distribution: distribution || "Evenly Distributed",
-        row_count: parseInt(rowCount, 10)
+        row_count: parseInt(rowCount, 10),
+        providers: providers
       });
       
       setResponse(res.data);

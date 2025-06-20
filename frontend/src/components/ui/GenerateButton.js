@@ -13,7 +13,8 @@ const GenerateButton = ({
   onReset, 
   isLoading, 
   isReset, 
-  canGenerate 
+  canGenerate,
+  multiMonth = false 
 }) => {
   const getButtonContent = () => {
     if (isLoading) {
@@ -46,7 +47,7 @@ const GenerateButton = ({
     return (
       <>
         <Zap className="mr-2 h-5 w-5" />
-        Generate FOCUS CUR
+        {multiMonth ? "Generate Trend Data" : "Generate FOCUS CUR"}
         <ChevronRight className="ml-2 h-5 w-5 group-hover:translate-x-1 transition-transform" />
       </>
     );

@@ -7,11 +7,9 @@ export const MagneticCard = ({ children, className = "", ...props }) => {
     <motion.div
       className={className}
       whileHover={{ 
-        scale: 1.03,
-        y: -8,
+        y: -1,
         transition: { duration: 0.2, ease: "easeOut" }
       }}
-      whileTap={{ scale: 0.98 }}
       {...props}
     >
       {children}

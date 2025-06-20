@@ -10,6 +10,8 @@ import HeroSection from "./components/sections/HeroSection";
 import ProfileSelection from "./components/sections/ProfileSelection";
 import DistributionSelection from "./components/sections/DistributionSelection";
 import RowCountSelector from "./components/forms/RowCountSelector";
+import CloudProviderSelector from "./components/ui/CloudProviderSelector";
+import TrendOptions from "./components/ui/TrendOptions";
 import GenerateButton from "./components/ui/GenerateButton";
 import ResultCard from "./components/ui/ResultCard";
 import Footer from "./components/sections/Footer";
@@ -32,6 +34,13 @@ import { useFocusGenerator } from "./hooks/useFocusGenerator";
 function AppContent() {
   const { isLoaded } = useTheme();
   const [showContent, setShowContent] = React.useState(false);
+  const [selectedProviders, setSelectedProviders] = React.useState(['aws']);
+  const [multiMonth, setMultiMonth] = React.useState(false);
+  const [trendOptions, setTrendOptions] = React.useState({
+    monthCount: 6,
+    scenario: "linear",
+    parameters: {}
+  });
   
   const {
     selectedProfile,
@@ -46,8 +55,6 @@ function AppContent() {
     generateCUR,
     resetSelections
   } = useFocusGenerator();
-
-  const canGenerate = selectedProfile && distribution;
 
   // Show content after theme is loaded to prevent flash
   React.useEffect(() => {
@@ -88,6 +95,14 @@ function AppContent() {
 
           {/* Main Content Container */}
           <StaggeredContainer className="w-full max-w-6xl px-4 mt-8 space-y-8">
+            {/* Cloud Provider Selection */}
+            <MagneticCard>
+              <CloudProviderSelector
+                selectedProviders={selectedProviders}
+                onProviderToggle={setSelectedProviders}
+              />
+            </MagneticCard>
+
             {/* Profile Selection */}
             <MagneticCard>
               <ProfileSelection 
@@ -113,14 +128,42 @@ function AppContent() {
               />
             </FloatingElement>
 
+            {/* Multi-Month Toggle */}
+            <FloatingElement delay={0.7}>
+              <div className="max-w-lg mx-auto">
+                <label className="flex items-center justify-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={multiMonth}
+                    onChange={(e) => setMultiMonth(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="relative w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/25 dark:peer-focus:ring-primary/50 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-primary"></div>
+                  <span className="ml-3 text-sm font-medium text-gray-900 dark:text-gray-300">
+                    Generate Multiple Months
+                  </span>
+                </label>
+              </div>
+            </FloatingElement>
+
+            {/* Trend Options - Show when multiMonth is enabled */}
+            <AnimatePresence>
+              {multiMonth && (
+                <FloatingElement delay={0.75}>
+                  <TrendOptions onOptionsChange={setTrendOptions} />
+                </FloatingElement>
+              )}
+            </AnimatePresence>
+
             {/* Generate Button */}
             <FloatingElement delay={0.8}>
               <GenerateButton 
-                onGenerate={generateCUR}
+                onGenerate={() => generateCUR(selectedProviders)}
                 onReset={resetSelections}
                 isLoading={isLoading}
                 isReset={isReset}
-                canGenerate={canGenerate}
+                canGenerate={selectedProfile && distribution && selectedProviders.length > 0}
+                multiMonth={multiMonth}
               />
             </FloatingElement>
 
