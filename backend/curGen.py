@@ -1,9 +1,12 @@
 import random
 import pandas as pd
 
-from .focus_metadata import FOCUS_METADATA
-from .column_generators import GenerationContext
-from .generator_factory import get_generator_factory
+from backend.focus_metadata import FOCUS_METADATA
+from backend.column_generators import GenerationContext
+from backend.generator_factory import get_generator_factory
+from backend.logging_config import setup_logging
+
+logger = setup_logging(__name__)
 
 # Profile cost ranges for distributing BilledCost
 PROFILE_COST_RANGES = {
@@ -18,7 +21,9 @@ def generate_profile_total_cost(profile):
     Pick a random total cost for the entire dataset, based on the chosen profile.
     """
     min_val, max_val = PROFILE_COST_RANGES.get(profile, (50_000, 100_000))
-    return random.uniform(min_val, max_val)
+    total_cost = random.uniform(min_val, max_val)
+    logger.info("Generated total cost", extra={"profile": profile, "total_cost": total_cost})
+    return total_cost
 
 
 def distribute_billed_cost(row_idx, row_count, total_dataset_cost):
@@ -178,6 +183,11 @@ def generate_focus_data(row_count=10, profile="Greenfield", distribution="Evenly
     Returns:
         A pandas DataFrame containing the generated data
     """
+    logger.info("Starting FOCUS data generation", extra={
+        "row_count": row_count,
+        "profile": profile,
+        "distribution": distribution
+    })
     # Step 1: Pick a total cost once for the entire dataset
     total_cost = generate_profile_total_cost(profile)
     columns_in_order = list(FOCUS_METADATA.keys())  # or define a custom order
@@ -212,7 +222,13 @@ def generate_focus_data(row_count=10, profile="Greenfield", distribution="Evenly
     df = pd.DataFrame(rows, columns=columns_in_order)
 
     # Step 2: Post-processing to fix cross-column constraints (optional)
+    logger.debug("Applying post-processing")
     df = post_process(df)
+    
+    logger.info("FOCUS data generation completed", extra={
+        "row_count": len(df),
+        "columns": len(df.columns)
+    })
     
     # Step 3: Apply distribution-specific post-processing
     df = apply_distribution_post_processing(df, distribution)

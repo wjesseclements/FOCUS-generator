@@ -13,7 +13,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
-from .focus_metadata import FOCUS_METADATA
+from backend.focus_metadata import FOCUS_METADATA
+from backend.logging_config import setup_logging
+
+logger = setup_logging(__name__)
 
 
 @dataclass

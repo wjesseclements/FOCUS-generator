@@ -7,7 +7,8 @@ and managing column generators.
 
 from typing import List
 
-from .column_generators import (
+from backend.logging_config import setup_logging
+from backend.column_generators import (
     ColumnGenerator,
     ChargeGenerator,
     CostGenerator,
@@ -27,6 +28,8 @@ from .column_generators import (
     MetadataGenerator,
     GenericGenerator,
 )
+
+logger = setup_logging(__name__)
 
 
 class ColumnGeneratorFactory:

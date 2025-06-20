@@ -6,16 +6,14 @@ from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 import boto3
 
-from .curGen import generate_focus_data
-from .validate_cur import validate_focus_df
-from .config import get_settings
+from backend.curGen import generate_focus_data
+from backend.validate_cur import validate_focus_df
+from backend.config import get_settings
+from backend.logging_config import setup_logging
+from backend.rate_limit_middleware import RateLimitMiddleware
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
+logger = setup_logging(__name__)
 
 # Initialize settings
 settings = get_settings()
@@ -25,6 +23,13 @@ app = FastAPI(
     description="Generate synthetic FOCUS-compliant Cost and Usage Reports",
     version="1.0.0",
     debug=settings.debug
+)
+
+# Add rate limiting middleware
+app.add_middleware(
+    RateLimitMiddleware,
+    requests_per_hour=100,
+    requests_per_minute=10
 )
 
 # Add CORS middleware with secure configuration
@@ -104,35 +109,48 @@ async def generate_cur(request: Request):
     filename = f"generated_CUR_{row_count}_{uuid.uuid4().hex[:8]}.csv"
     csv_data = df.to_csv(index=False)
     
-    # 4. Upload to S3
-    try:
-        # Upload without public ACL for better security
-        put_object_params = {
-            'Bucket': settings.s3_bucket_name,
-            'Key': filename,
-            'Body': csv_data,
-            'ContentType': 'text/csv',
-        }
+    # 4. Handle file storage (S3 for production, local for development)
+    if settings.environment == "development" and settings.s3_bucket_name == "local":
+        # Local development - save to files directory
+        import os
+        files_dir = os.path.join(os.path.dirname(__file__), "files")
+        os.makedirs(files_dir, exist_ok=True)
+        file_path = os.path.join(files_dir, filename)
         
-        # Only add public ACL if explicitly configured (not recommended for production)
-        if settings.s3_public_read:
-            put_object_params['ACL'] = 'public-read'
+        with open(file_path, 'w') as f:
+            f.write(csv_data)
         
-        s3_client.put_object(**put_object_params)
-        
-        # Generate a pre-signed URL (valid for 1 hour)
-        file_url = s3_client.generate_presigned_url(
-            'get_object',
-            Params={'Bucket': settings.s3_bucket_name, 'Key': filename},
-            ExpiresIn=3600
-        )
-        logger.info(f"Successfully uploaded {filename} to S3 bucket {settings.s3_bucket_name}")
-    except Exception as e:
-        logger.error(f"Failed to upload file to S3: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to upload file to S3: {str(e)}"
-        )
+        # Return local file URL pointing to backend
+        file_url = f"http://localhost:8000/files/{filename}"
+        logger.info(f"Successfully saved {filename} to local files directory")
+    else:
+        # Production - upload to S3
+        try:
+            put_object_params = {
+                'Bucket': settings.s3_bucket_name,
+                'Key': filename,
+                'Body': csv_data,
+                'ContentType': 'text/csv',
+            }
+            
+            if settings.s3_public_read:
+                put_object_params['ACL'] = 'public-read'
+            
+            s3_client.put_object(**put_object_params)
+            
+            # Generate a pre-signed URL (valid for 1 hour)
+            file_url = s3_client.generate_presigned_url(
+                'get_object',
+                Params={'Bucket': settings.s3_bucket_name, 'Key': filename},
+                ExpiresIn=3600
+            )
+            logger.info(f"Successfully uploaded {filename} to S3 bucket {settings.s3_bucket_name}")
+        except Exception as e:
+            logger.error(f"Failed to upload file to S3: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to upload file to S3: {str(e)}"
+            )
 
     # 5. Return success with the file URL
     return {
@@ -142,13 +160,30 @@ async def generate_cur(request: Request):
 
 @app.get("/files/{filename}")
 async def get_file(filename: str):
-    # For compatibility with old code, redirect to S3
-    try:
-        file_url = s3_client.generate_presigned_url(
-            'get_object',
-            Params={'Bucket': settings.s3_bucket_name, 'Key': filename},
-            ExpiresIn=3600
-        )
-        return RedirectResponse(url=file_url)
-    except Exception:
-        raise HTTPException(status_code=404, detail="File not found.")
+    if settings.environment == "development" and settings.s3_bucket_name == "local":
+        # Local development - serve from files directory
+        import os
+        from fastapi.responses import FileResponse
+        
+        files_dir = os.path.join(os.path.dirname(__file__), "files")
+        file_path = os.path.join(files_dir, filename)
+        
+        if os.path.exists(file_path):
+            return FileResponse(
+                path=file_path,
+                filename=filename,
+                media_type='text/csv'
+            )
+        else:
+            raise HTTPException(status_code=404, detail="File not found.")
+    else:
+        # Production - redirect to S3
+        try:
+            file_url = s3_client.generate_presigned_url(
+                'get_object',
+                Params={'Bucket': settings.s3_bucket_name, 'Key': filename},
+                ExpiresIn=3600
+            )
+            return RedirectResponse(url=file_url)
+        except Exception:
+            raise HTTPException(status_code=404, detail="File not found.")

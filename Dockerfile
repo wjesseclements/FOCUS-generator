@@ -1,5 +1,5 @@
 # Use a base image
-FROM python:3.10-slim
+FROM python:3.11-slim
 
 # Set the working directory
 WORKDIR /app
@@ -12,4 +12,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Set the command to run the application
-CMD ["python", "curGen.py"]
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]

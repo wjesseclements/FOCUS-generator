@@ -2,7 +2,9 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
+@layer base {
+  body {
+    @apply bg-gray-50 dark:bg-dark-bg text-gray-900 dark:text-gray-100 antialiased transition-colors duration-300;
     margin: 0;
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
       'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
@@ -14,3 +16,154 @@ body {
   code {
     font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
   }
+
+  /* Dark mode transitions for all elements */
+  * {
+    @apply transition-colors duration-300;
+  }
+}
+
+@layer components {
+  /* Glass morphism base styles */
+  .glass {
+    @apply bg-glass-light dark:bg-glass-dark-light backdrop-blur-md border border-white/20 dark:border-white/10 shadow-glass;
+  }
+  
+  .glass-card {
+    @apply glass rounded-2xl p-6 transition-all duration-300 hover:shadow-xl hover:scale-[1.02] dark:hover:shadow-2xl;
+  }
+  
+  /* Gradient text */
+  .gradient-text {
+    @apply bg-gradient-to-r from-primary-from to-primary-to bg-clip-text text-transparent;
+  }
+  
+  /* Modern input styles */
+  .input-glass {
+    @apply glass rounded-xl px-4 py-2 focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-300 text-gray-900 dark:text-gray-100;
+  }
+
+  /* Dark mode card styles */
+  .dark-card {
+    @apply bg-dark-card dark:bg-dark-surface border border-dark-border dark:border-gray-700;
+  }
+}
+
+@layer utilities {
+  /* Animation utilities */
+  .animate-in {
+    animation: animateIn 0.5s ease-out;
+  }
+  
+  @keyframes animateIn {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  
+  /* Gradient backgrounds with animation support */
+  .bg-gradient-animate {
+    background-size: 200% 200%;
+    animation: gradient-shift 8s ease infinite;
+  }
+  
+  /* Custom range slider styles */
+  .slider {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 8px;
+    border-radius: 50px;
+    outline: none;
+    transition: all 0.3s ease;
+  }
+  
+  .slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    transition: all 0.3s ease;
+  }
+  
+  .slider::-webkit-slider-thumb:hover {
+    transform: scale(1.1);
+    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+  }
+  
+  .slider::-moz-range-thumb {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    cursor: pointer;
+    border: none;
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    transition: all 0.3s ease;
+  }
+  
+  .slider::-moz-range-thumb:hover {
+    transform: scale(1.1);
+    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+  }
+
+  /* Tippy.js override - Most specific selectors */
+  div[data-tippy-root] .tippy-box,
+  .tippy-popper .tippy-box,
+  [data-tippy-root] .tippy-box {
+    background-color: rgba(255, 255, 255, 0.9) !important;
+    background-image: none !important;
+    backdrop-filter: blur(20px) !important;
+    -webkit-backdrop-filter: blur(20px) !important;
+    border: 1px solid rgba(255, 255, 255, 0.4) !important;
+    border-radius: 16px !important;
+    box-shadow: 
+      0 20px 25px -5px rgba(0, 0, 0, 0.1),
+      0 10px 10px -5px rgba(0, 0, 0, 0.04),
+      inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+    color: #1f2937 !important;
+    font-size: 14px !important;
+    font-weight: 500 !important;
+    padding: 0 !important;
+  }
+
+  .dark div[data-tippy-root] .tippy-box,
+  .dark .tippy-popper .tippy-box,
+  .dark [data-tippy-root] .tippy-box {
+    background-color: rgba(31, 41, 55, 0.95) !important;
+    border: 1px solid rgba(255, 255, 255, 0.2) !important;
+    color: #f9fafb !important;
+    box-shadow: 
+      0 20px 25px -5px rgba(0, 0, 0, 0.4),
+      0 10px 10px -5px rgba(0, 0, 0, 0.2),
+      inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+  }
+
+  div[data-tippy-root] .tippy-content,
+  .tippy-popper .tippy-content,
+  [data-tippy-root] .tippy-content {
+    padding: 14px 18px !important;
+    line-height: 1.6 !important;
+    font-family: inherit !important;
+  }
+
+  div[data-tippy-root] .tippy-arrow,
+  .tippy-popper .tippy-arrow,
+  [data-tippy-root] .tippy-arrow {
+    color: rgba(255, 255, 255, 0.9) !important;
+  }
+
+  .dark div[data-tippy-root] .tippy-arrow,
+  .dark .tippy-popper .tippy-arrow,
+  .dark [data-tippy-root] .tippy-arrow {
+    color: rgba(31, 41, 55, 0.95) !important;
+  }
+}
