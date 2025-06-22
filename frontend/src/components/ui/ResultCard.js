@@ -5,12 +5,15 @@ import {
   Download,
   FileSpreadsheet,
   Clock,
-  CheckCircle2
+  CheckCircle2,
+  BarChart2,
+  Eye,
+  EyeOff
 } from "lucide-react";
 import { Button } from "./button";
 import { Card, CardContent } from "./card";
 
-const ResultCard = ({ response, rowCount, onDownload }) => {
+const ResultCard = ({ response, rowCount, onDownload, showVisualization, onToggleVisualization }) => {
   // Debug logging
   if (response) {
     console.log('ResultCard response:', response);
@@ -89,6 +92,32 @@ const ResultCard = ({ response, rowCount, onDownload }) => {
                   <Download className="mr-2 h-5 w-5 group-hover:animate-bounce" />
                   Download Your Report
                 </a>
+              </motion.div>
+
+              {/* Visualization Toggle Button */}
+              <motion.div
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ delay: 0.9, type: "spring", stiffness: 200 }}
+                className="mt-4"
+              >
+                <Button
+                  onClick={onToggleVisualization}
+                  variant="outline"
+                  className="w-full bg-white/80 hover:bg-white/90 dark:bg-gray-800/80 dark:hover:bg-gray-800/90 border-blue-200 dark:border-blue-700 text-blue-700 dark:text-blue-300"
+                >
+                  {showVisualization ? (
+                    <>
+                      <EyeOff className="mr-2 h-5 w-5" />
+                      Hide Visualization
+                    </>
+                  ) : (
+                    <>
+                      <BarChart2 className="mr-2 h-5 w-5" />
+                      Visualize Data
+                    </>
+                  )}
+                </Button>
               </motion.div>
               
               {/* Additional Info */}

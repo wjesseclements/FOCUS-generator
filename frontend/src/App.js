@@ -18,6 +18,7 @@ import Footer from "./components/sections/Footer";
 import { Toaster } from "./components/ui/toaster";
 import DarkModeToggle from "./components/ui/DarkModeToggle";
 import { LoadingSkeleton } from "./components/ui/LoadingSkeleton";
+import CURVisualization from "./components/sections/CURVisualization";
 
 // Animations
 import { 
@@ -41,6 +42,8 @@ function AppContent() {
     scenario: "linear",
     parameters: {}
   });
+  const [showVisualization, setShowVisualization] = React.useState(false);
+  const [csvData, setCsvData] = React.useState(null);
   
   const {
     selectedProfile,
@@ -63,6 +66,43 @@ function AppContent() {
       return () => clearTimeout(timer);
     }
   }, [isLoaded]);
+
+  // Parse CSV data from response
+  const parseCSVData = React.useCallback((csvText) => {
+    const lines = csvText.trim().split('\n');
+    const headers = lines[0].split(',').map(h => h.trim());
+    
+    const data = [];
+    for (let i = 1; i < lines.length; i++) {
+      const values = lines[i].split(',');
+      const row = {};
+      headers.forEach((header, index) => {
+        row[header] = values[index]?.trim() || '';
+      });
+      data.push(row);
+    }
+    return data;
+  }, []);
+
+  // Fetch and parse CSV when response is available
+  React.useEffect(() => {
+    if (response && response.downloadUrl) {
+      // Reset visualization state when new data is generated
+      setShowVisualization(false);
+      
+      // Fetch the CSV data
+      fetch(response.downloadUrl)
+        .then(res => res.text())
+        .then(csvText => {
+          const parsedData = parseCSVData(csvText);
+          setCsvData(parsedData);
+        })
+        .catch(err => {
+          console.error("Error fetching CSV data:", err);
+          toast.error("Could not load data for visualization");
+        });
+    }
+  }, [response, parseCSVData]);
 
   const handleDownload = () => {
     toast.success("Download started!", {
@@ -179,7 +219,18 @@ function AppContent() {
               response={response}
               rowCount={rowCount}
               onDownload={handleDownload}
+              showVisualization={showVisualization}
+              onToggleVisualization={() => setShowVisualization(!showVisualization)}
             />
+
+            {/* CUR Visualization */}
+            <AnimatePresence>
+              {showVisualization && csvData && (
+                <FloatingElement delay={0.2}>
+                  <CURVisualization data={csvData} />
+                </FloatingElement>
+              )}
+            </AnimatePresence>
           </StaggeredContainer>
         </PageTransition>
 
