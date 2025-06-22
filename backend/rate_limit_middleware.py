@@ -75,10 +75,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         headers = {
             "X-RateLimit-Limit-Minute": str(self.requests_per_minute),
             "X-RateLimit-Limit-Hour": str(self.requests_per_hour),
-            "X-RateLimit-Remaining-Minute": str(max(0, self.requests_per_minute - self.minute_counts[client_ip])),
-            "X-RateLimit-Remaining-Hour": str(max(0, self.requests_per_hour - self.hour_counts[client_ip])),
-            "X-RateLimit-Reset-Minute": str(int(self.minute_resets[client_ip])),
-            "X-RateLimit-Reset-Hour": str(int(self.hour_resets[client_ip]))
+            "X-RateLimit-Remaining-Minute": str(max(0, self.requests_per_minute - self.minute_counts.get(client_ip, 0))),
+            "X-RateLimit-Remaining-Hour": str(max(0, self.requests_per_hour - self.hour_counts.get(client_ip, 0))),
+            "X-RateLimit-Reset-Minute": str(int(self.minute_resets.get(client_ip, current_time + 60))),
+            "X-RateLimit-Reset-Hour": str(int(self.hour_resets.get(client_ip, current_time + 3600)))
         }
         
         # Check if limits exceeded

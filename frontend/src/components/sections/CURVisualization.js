@@ -1,5 +1,5 @@
-import React, { useMemo } from "react";
-import { motion } from "framer-motion";
+import React, { useMemo, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   BarChart,
   Bar,
@@ -13,9 +13,13 @@ import {
   Tooltip,
   Legend,
   ResponsiveContainer,
-  Cell
+  Cell,
+  Treemap,
+  AreaChart,
+  Area
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
+import KPISummary from "./KPISummary";
 
 const COLORS = [
   "#0088FE", "#00C49F", "#FFBB28", "#FF8042", "#8884D8",
@@ -29,13 +33,18 @@ const fadeInUp = {
 };
 
 const CURVisualization = ({ data }) => {
+  const [selectedService, setSelectedService] = useState(null);
+  const [animationComplete, setAnimationComplete] = useState(false);
+
   // Process data for visualizations
-  const { serviceData, providerData, dailyData, topResources } = useMemo(() => {
+  const { serviceData, providerData, dailyData, topResources, regionData, resourceTypeData } = useMemo(() => {
     if (!data || data.length === 0) return {
       serviceData: [],
       providerData: [],
       dailyData: [],
-      topResources: []
+      topResources: [],
+      regionData: [],
+      resourceTypeData: []
     };
 
     // Aggregate by service
@@ -43,6 +52,8 @@ const CURVisualization = ({ data }) => {
     const providerMap = {};
     const dailyMap = {};
     const resourceMap = {};
+    const regionMap = {};
+    const resourceTypeMap = {};
 
     data.forEach(row => {
       // Service aggregation
@@ -62,6 +73,14 @@ const CURVisualization = ({ data }) => {
       if (resource !== "Unknown") {
         resourceMap[resource] = (resourceMap[resource] || 0) + parseFloat(row.BilledCost || 0);
       }
+
+      // Region aggregation
+      const region = row.RegionName || row.RegionId || "Unknown";
+      regionMap[region] = (regionMap[region] || 0) + parseFloat(row.BilledCost || 0);
+
+      // Resource type aggregation
+      const resourceType = row.ResourceType || "Unknown";
+      resourceTypeMap[resourceType] = (resourceTypeMap[resourceType] || 0) + parseFloat(row.BilledCost || 0);
     });
 
     // Convert to arrays and sort
@@ -82,7 +101,17 @@ const CURVisualization = ({ data }) => {
       .sort((a, b) => b.value - a.value)
       .slice(0, 5);
 
-    return { serviceData, providerData, dailyData, topResources };
+    const regionData = Object.entries(regionMap)
+      .map(([name, value]) => ({ name, value: Math.round(value * 100) / 100 }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 10);
+
+    const resourceTypeData = Object.entries(resourceTypeMap)
+      .map(([name, value]) => ({ name, value: Math.round(value * 100) / 100 }))
+      .filter(item => item.name !== "Unknown")
+      .sort((a, b) => b.value - a.value);
+
+    return { serviceData, providerData, dailyData, topResources, regionData, resourceTypeData };
   }, [data]);
 
   const formatCurrency = (value) => {
@@ -116,35 +145,59 @@ const CURVisualization = ({ data }) => {
       initial="initial"
       animate="animate"
       className="space-y-6"
+      onAnimationComplete={() => setAnimationComplete(true)}
     >
+      {/* KPI Summary Cards */}
+      <KPISummary data={data} />
       {/* Cost by Service */}
-      <Card className="overflow-hidden">
-        <CardHeader>
-          <CardTitle className="text-lg font-semibold text-gray-800 dark:text-gray-100">
-            Cost by Service (Top 10)
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={serviceData}>
-              <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
-              <XAxis 
-                dataKey="name" 
-                angle={-45} 
-                textAnchor="end" 
-                height={100}
-                tick={{ fontSize: 12, fill: '#6B7280' }}
-              />
-              <YAxis 
-                tickFormatter={formatCurrency}
-                tick={{ fontSize: 12, fill: '#6B7280' }}
-              />
-              <Tooltip content={<CustomTooltip />} />
-              <Bar dataKey="value" fill="#3B82F6" radius={[8, 8, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </CardContent>
-      </Card>
+      <motion.div
+        initial={{ opacity: 0, x: -20 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ delay: 0.2 }}
+      >
+        <Card className="overflow-hidden hover:shadow-xl transition-shadow duration-300">
+          <CardHeader>
+            <CardTitle className="text-lg font-semibold text-gray-800 dark:text-gray-100">
+              Cost by Service (Top 10)
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={serviceData}>
+                <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+                <XAxis 
+                  dataKey="name" 
+                  angle={-45} 
+                  textAnchor="end" 
+                  height={100}
+                  tick={{ fontSize: 12, fill: '#6B7280' }}
+                />
+                <YAxis 
+                  tickFormatter={formatCurrency}
+                  tick={{ fontSize: 12, fill: '#6B7280' }}
+                />
+                <Tooltip content={<CustomTooltip />} />
+                <Bar 
+                  dataKey="value" 
+                  fill="#3B82F6" 
+                  radius={[8, 8, 0, 0]}
+                  animationDuration={1000}
+                  onMouseEnter={(data, index) => setSelectedService(data.name)}
+                  onMouseLeave={() => setSelectedService(null)}
+                >
+                  {serviceData.map((entry, index) => (
+                    <Cell 
+                      key={`cell-${index}`} 
+                      fill={selectedService === entry.name ? '#2563EB' : '#3B82F6'}
+                      style={{ transition: 'fill 0.3s ease' }}
+                    />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      </motion.div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Cost by Provider */}
@@ -208,37 +261,113 @@ const CURVisualization = ({ data }) => {
       </div>
 
       {/* Daily Cost Trend */}
-      <Card className="overflow-hidden">
-        <CardHeader>
-          <CardTitle className="text-lg font-semibold text-gray-800 dark:text-gray-100">
-            Daily Cost Trend
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ResponsiveContainer width="100%" height={250}>
-            <LineChart data={dailyData}>
-              <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
-              <XAxis 
-                dataKey="date" 
-                tick={{ fontSize: 12, fill: '#6B7280' }}
-              />
-              <YAxis 
-                tickFormatter={formatCurrency}
-                tick={{ fontSize: 12, fill: '#6B7280' }}
-              />
-              <Tooltip content={<CustomTooltip />} />
-              <Line 
-                type="monotone" 
-                dataKey="value" 
-                stroke="#10B981" 
-                strokeWidth={2}
-                dot={{ fill: '#10B981', r: 4 }}
-                activeDot={{ r: 6 }}
-              />
-            </LineChart>
-          </ResponsiveContainer>
-        </CardContent>
-      </Card>
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.6 }}
+      >
+        <Card className="overflow-hidden hover:shadow-xl transition-shadow duration-300">
+          <CardHeader>
+            <CardTitle className="text-lg font-semibold text-gray-800 dark:text-gray-100">
+              Daily Cost Trend
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={250}>
+              <AreaChart data={dailyData}>
+                <defs>
+                  <linearGradient id="colorCost" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#10B981" stopOpacity={0.8}/>
+                    <stop offset="95%" stopColor="#10B981" stopOpacity={0.1}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+                <XAxis 
+                  dataKey="date" 
+                  tick={{ fontSize: 12, fill: '#6B7280' }}
+                />
+                <YAxis 
+                  tickFormatter={formatCurrency}
+                  tick={{ fontSize: 12, fill: '#6B7280' }}
+                />
+                <Tooltip content={<CustomTooltip />} />
+                <Area
+                  type="monotone"
+                  dataKey="value"
+                  stroke="#10B981"
+                  strokeWidth={2}
+                  fillOpacity={1}
+                  fill="url(#colorCost)"
+                  animationDuration={1500}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      </motion.div>
+
+      {/* Regional Distribution */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <motion.div
+          initial={{ opacity: 0, x: -20 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ delay: 0.8 }}
+        >
+          <Card className="overflow-hidden hover:shadow-xl transition-shadow duration-300">
+            <CardHeader>
+              <CardTitle className="text-lg font-semibold text-gray-800 dark:text-gray-100">
+                Cost by Region
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={regionData} layout="horizontal">
+                  <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+                  <XAxis type="number" tickFormatter={formatCurrency} tick={{ fontSize: 12, fill: '#6B7280' }} />
+                  <YAxis dataKey="name" type="category" width={120} tick={{ fontSize: 12, fill: '#6B7280' }} />
+                  <Tooltip content={<CustomTooltip />} />
+                  <Bar dataKey="value" fill="#8B5CF6" radius={[0, 8, 8, 0]} animationDuration={1000}>
+                    {regionData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        </motion.div>
+
+        {/* Resource Type Treemap */}
+        <motion.div
+          initial={{ opacity: 0, x: 20 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ delay: 0.9 }}
+        >
+          <Card className="overflow-hidden hover:shadow-xl transition-shadow duration-300">
+            <CardHeader>
+              <CardTitle className="text-lg font-semibold text-gray-800 dark:text-gray-100">
+                Cost by Resource Type
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={300}>
+                <Treemap
+                  data={resourceTypeData}
+                  dataKey="value"
+                  stroke="#fff"
+                  fill="#8884d8"
+                  animationDuration={1000}
+                >
+                  <Tooltip content={<CustomTooltip />} />
+                  {resourceTypeData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                  ))}
+                </Treemap>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        </motion.div>
+      </div>
     </motion.div>
   );
 };

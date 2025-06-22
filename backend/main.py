@@ -132,6 +132,7 @@ async def generate_cur(request: Request):
         summary = multi_gen.get_file_summary(files)
         
         # Handle file storage
+        logger.info(f"Environment: {settings.environment}, S3 Bucket: {settings.s3_bucket_name}")
         if settings.environment == "development" and settings.s3_bucket_name == "local":
             # Local development
             file_url = f"http://localhost:8000/files/{zip_filename}"
@@ -182,6 +183,38 @@ async def generate_cur(request: Request):
             status_code=500,
             detail=f"Failed to generate FOCUS data: {str(e)}"
         )
+
+@app.get("/files/{filename}/csv")
+async def get_csv_from_zip(filename: str):
+    """Extract and return the first CSV file from a ZIP archive."""
+    if settings.environment == "development" and settings.s3_bucket_name == "local":
+        import os
+        import zipfile
+        from fastapi.responses import Response
+        
+        file_path = os.path.join(os.path.dirname(__file__), "files", filename)
+        
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="File not found")
+        
+        if filename.endswith('.zip'):
+            # Extract first CSV from ZIP
+            with zipfile.ZipFile(file_path, 'r') as zip_file:
+                csv_files = [f for f in zip_file.namelist() if f.endswith('.csv')]
+                if csv_files:
+                    csv_content = zip_file.read(csv_files[0])
+                    return Response(
+                        content=csv_content,
+                        media_type="text/csv",
+                        headers={
+                            "Content-Disposition": f"inline; filename={csv_files[0]}"
+                        }
+                    )
+            raise HTTPException(status_code=404, detail="No CSV file found in ZIP")
+        else:
+            raise HTTPException(status_code=400, detail="File is not a ZIP archive")
+    else:
+        raise HTTPException(status_code=404, detail="Endpoint only available in development")
 
 @app.get("/files/{filename}")
 async def get_file(filename: str):

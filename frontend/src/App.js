@@ -91,7 +91,12 @@ function AppContent() {
       setShowVisualization(false);
       
       // Fetch the CSV data
-      fetch(response.downloadUrl)
+      // If downloadUrl is a ZIP file, append /csv to get the CSV content
+      const csvUrl = response.downloadUrl.endsWith('.zip') 
+        ? response.downloadUrl + '/csv'
+        : response.downloadUrl;
+        
+      fetch(csvUrl)
         .then(res => res.text())
         .then(csvText => {
           const parsedData = parseCSVData(csvText);
