@@ -26,7 +26,7 @@ const ProfileCard = ({
       >
         <Card
           onClick={() => onSelect(profile.name)}
-          className={`cursor-pointer transition-all duration-300 hover:scale-105 relative ${
+          className={`cursor-pointer transition-all duration-300 hover:scale-105 relative min-h-[120px] ${
             isSelected
               ? 'ring-2 ring-primary ring-offset-2 shadow-xl'
               : 'hover:shadow-lg'
@@ -52,7 +52,7 @@ const ProfileCard = ({
               <div className="flex-1">
                 <h3 className="font-semibold text-lg text-gray-800 dark:text-gray-100">{profile.name}</h3>
                 {showDescription && (
-                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{profile.description}</p>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-1 whitespace-pre-line">{profile.description}</p>
                 )}
               </div>
             </div>

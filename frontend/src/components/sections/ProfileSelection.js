@@ -24,19 +24,19 @@ const fadeInUp = {
 const profiles = [
   {
     name: "Greenfield",
-    description: "For startups or small businesses ($20k–$50k/month).",
+    description: "For startups or small businesses\n($20k–$50k/month).",
     icon: Sparkles,
     gradient: "from-green-400 to-blue-500",
   },
   {
     name: "Large Business",
-    description: "For medium-sized organizations ($100k–$250k/month).",
+    description: "For medium-sized organizations\n($100k–$250k/month).",
     icon: Database,
     gradient: "from-blue-500 to-purple-600",
   },
   {
     name: "Enterprise",
-    description: "For large corporations ($1M+/month).",
+    description: "For large corporations\n($1M+/month).",
     icon: Cpu,
     gradient: "from-purple-600 to-pink-600",
   },
@@ -54,10 +54,10 @@ const ProfileSelection = ({ selectedProfile, onProfileSelect }) => {
         variants={fadeInUp} 
         className="text-center mb-6"
       >
-        <h2 className="text-2xl font-bold text-gray-800 mb-2">
+        <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100 mb-2">
           Choose Your Profile
         </h2>
-        <p className="text-gray-600">
+        <p className="text-gray-600 dark:text-gray-400">
           Select the profile that best matches your organization size
         </p>
       </motion.div>

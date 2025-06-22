@@ -61,10 +61,10 @@ const DistributionSelection = ({ selectedDistribution, onDistributionSelect }) =
         variants={fadeInUp} 
         className="text-center mb-6"
       >
-        <h2 className="text-2xl font-bold text-gray-800 mb-2">
+        <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100 mb-2">
           Select Distribution
         </h2>
-        <p className="text-gray-600">
+        <p className="text-gray-600 dark:text-gray-400">
           Choose how you want the cost data to be distributed across services
         </p>
       </motion.div>
