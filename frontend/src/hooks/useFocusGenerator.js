@@ -12,7 +12,7 @@ export const useFocusGenerator = () => {
   const [isReset, setIsReset] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
-  const generateCUR = async (providers = []) => {
+  const generateCUR = async (providers = [], trendOptions = null, multiMonth = false) => {
     if (!selectedProfile || !distribution) {
       toast.error("Please select both a profile and distribution");
       return;
@@ -25,22 +25,37 @@ export const useFocusGenerator = () => {
 
     try {
       setIsLoading(true);
-      toast.loading("Generating FOCUS CUR...", { id: "generating" });
+      const loadingMessage = multiMonth ? "Generating trend data..." : "Generating FOCUS CUR...";
+      toast.loading(loadingMessage, { id: "generating" });
       
-      const res = await axios.post(`${API_URL}/generate-cur`, {
+      const requestData = {
         profile: selectedProfile,
         distribution: distribution || "Evenly Distributed",
         row_count: parseInt(rowCount, 10),
-        providers: providers
-      });
+        providers: providers,
+        multi_month: multiMonth
+      };
+      
+      if (multiMonth && trendOptions) {
+        requestData.trend_options = trendOptions;
+      }
+      
+      const res = await axios.post(`${API_URL}/generate-cur`, requestData);
       
       setResponse(res.data);
       setIsReset(true);
       setIsLoading(false);
       
-      toast.success("CUR generated successfully!", { 
+      const successMessage = multiMonth 
+        ? "Trend data generated successfully!" 
+        : "CUR generated successfully!";
+      const description = multiMonth
+        ? `Your multi-month FOCUS dataset is ready for download.`
+        : `Your ${rowCount}-row FOCUS report is ready for download.`;
+        
+      toast.success(successMessage, { 
         id: "generating",
-        description: `Your ${rowCount}-row FOCUS report is ready for download.`
+        description: description
       });
     } catch (error) {
       console.error("Error generating CUR:", error);

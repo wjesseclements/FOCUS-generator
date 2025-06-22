@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Download Test</title>
+</head>
+<body>
+    <h1>Testing FOCUS Generator Download</h1>
+    
+    <h2>Test 1: Direct Download Link</h2>
+    <a href="http://localhost:8000/files/aws-focus-2025-06.csv" download>
+        Download aws-focus-2025-06.csv
+    </a>
+    
+    <h2>Test 2: Button with onclick</h2>
+    <button onclick="window.location.href='http://localhost:8000/files/aws-focus-2025-06.csv'">
+        Download via window.location
+    </button>
+    
+    <h2>Test 3: Fetch and Download</h2>
+    <button onclick="fetchAndDownload()">
+        Fetch and Download
+    </button>
+    
+    <script>
+        async function fetchAndDownload() {
+            try {
+                const response = await fetch('http://localhost:8000/files/aws-focus-2025-06.csv');
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'aws-focus-2025-06.csv';
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+                console.log('Download successful');
+            } catch (error) {
+                console.error('Download failed:', error);
+            }
+        }
+    </script>
+</body>
+</html>

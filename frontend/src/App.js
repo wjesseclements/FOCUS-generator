@@ -158,7 +158,7 @@ function AppContent() {
             {/* Generate Button */}
             <FloatingElement delay={0.8}>
               <GenerateButton 
-                onGenerate={() => generateCUR(selectedProviders)}
+                onGenerate={() => generateCUR(selectedProviders, trendOptions, multiMonth)}
                 onReset={resetSelections}
                 isLoading={isLoading}
                 isReset={isReset}

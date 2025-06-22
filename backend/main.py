@@ -2,7 +2,7 @@ import uuid
 import logging
 import pandas as pd
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 import boto3
 
@@ -11,6 +11,9 @@ from backend.validate_cur import validate_focus_df
 from backend.config import get_settings
 from backend.logging_config import setup_logging
 from backend.rate_limit_middleware import RateLimitMiddleware
+from backend.models import GenerateCURRequest
+from backend.multi_file_generator import MultiFileGenerator
+from datetime import datetime
 
 # Configure logging
 logger = setup_logging(__name__)
@@ -72,65 +75,80 @@ async def root():
 
 @app.post("/generate-cur")
 async def generate_cur(request: Request):
-    # Parse incoming request body
-    body = await request.json()
-    profile = body.get("profile", "").strip()
-    distribution = body.get("distribution", "").strip()
-    row_count = body.get("row_count", 20)
-
-    # Validate inputs
-    if profile not in VALID_PROFILES:
-        raise HTTPException(status_code=400, detail="Invalid profile selected.")
-    if distribution not in VALID_DISTRIBUTIONS:
-        raise HTTPException(status_code=400, detail="Invalid distribution selected.")
-    try:
-        row_count = int(row_count)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="row_count must be an integer.")
-
-    # Log received data
-    logger.info(f"Generate CUR request - Profile: {profile}, Distribution: {distribution}, Rows: {row_count}")
-
-    # 1. Generate the CUR data
-    df = generate_focus_data(row_count=row_count, profile=profile, distribution=distribution)
-
-    # 2. Validate the generated DataFrame
-    try:
-        validate_focus_df(df)
-        logger.info(f"Data validation passed for {row_count} rows")
-    except ValueError as e:
-        logger.error(f"Data validation failed: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Data validation failed: {str(e)}"
-        )
-
-    # 3. Save to CSV in memory
-    filename = f"generated_CUR_{row_count}_{uuid.uuid4().hex[:8]}.csv"
-    csv_data = df.to_csv(index=False)
+    """Generate FOCUS-compliant CUR data with multi-cloud and multi-month support."""
     
-    # 4. Handle file storage (S3 for production, local for development)
-    if settings.environment == "development" and settings.s3_bucket_name == "local":
-        # Local development - save to files directory
-        import os
-        files_dir = os.path.join(os.path.dirname(__file__), "files")
-        os.makedirs(files_dir, exist_ok=True)
-        file_path = os.path.join(files_dir, filename)
+    try:
+        # Parse request body
+        body = await request.json()
+        req = GenerateCURRequest(**body)
+    except Exception as e:
+        logger.error(f"Invalid request: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Invalid request: {str(e)}")
+    
+    logger.info("Generate CUR request", extra={
+        "profile": req.profile,
+        "distribution": req.distribution,
+        "row_count": req.row_count,
+        "providers": req.providers,
+        "multi_month": req.multi_month,
+        "trend_options": req.trend_options
+    })
+
+    # Initialize multi-file generator
+    multi_gen = MultiFileGenerator()
+    
+    try:
+        if req.multi_month and req.trend_options:
+            # Generate multi-month trend data
+            files = multi_gen.generate_trend_files(
+                providers=req.providers,
+                profile=req.profile,
+                distribution=req.distribution,
+                row_count=req.row_count,
+                trend_options=req.trend_options
+            )
+        else:
+            # Generate single month multi-cloud data
+            files = multi_gen.generate_multi_cloud_files(
+                providers=req.providers,
+                profile=req.profile,
+                distribution=req.distribution,
+                row_count=req.row_count
+            )
         
-        with open(file_path, 'w') as f:
-            f.write(csv_data)
+        # Create ZIP package
+        temp_dir = None
+        if settings.environment == "development" and settings.s3_bucket_name == "local":
+            import os
+            temp_dir = os.path.join(os.path.dirname(__file__), "files")
+            
+        zip_filename = multi_gen.create_zip_package(
+            files=files,
+            trend_options=req.trend_options if req.multi_month else None,
+            temp_dir=temp_dir
+        )
         
-        # Return local file URL pointing to backend
-        file_url = f"http://localhost:8000/files/{filename}"
-        logger.info(f"Successfully saved {filename} to local files directory")
-    else:
-        # Production - upload to S3
-        try:
+        # Get file summary
+        summary = multi_gen.get_file_summary(files)
+        
+        # Handle file storage
+        if settings.environment == "development" and settings.s3_bucket_name == "local":
+            # Local development
+            file_url = f"http://localhost:8000/files/{zip_filename}"
+            logger.info(f"Successfully created ZIP package: {zip_filename}")
+        else:
+            # Production - upload ZIP to S3
+            import os
+            zip_path = os.path.join(temp_dir or "/tmp", zip_filename)
+            
+            with open(zip_path, 'rb') as f:
+                zip_data = f.read()
+            
             put_object_params = {
                 'Bucket': settings.s3_bucket_name,
-                'Key': filename,
-                'Body': csv_data,
-                'ContentType': 'text/csv',
+                'Key': zip_filename,
+                'Body': zip_data,
+                'ContentType': 'application/zip',
             }
             
             if settings.s3_public_read:
@@ -138,41 +156,50 @@ async def generate_cur(request: Request):
             
             s3_client.put_object(**put_object_params)
             
-            # Generate a pre-signed URL (valid for 1 hour)
+            # Generate pre-signed URL
             file_url = s3_client.generate_presigned_url(
                 'get_object',
-                Params={'Bucket': settings.s3_bucket_name, 'Key': filename},
+                Params={'Bucket': settings.s3_bucket_name, 'Key': zip_filename},
                 ExpiresIn=3600
             )
-            logger.info(f"Successfully uploaded {filename} to S3 bucket {settings.s3_bucket_name}")
-        except Exception as e:
-            logger.error(f"Failed to upload file to S3: {str(e)}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to upload file to S3: {str(e)}"
-            )
+            
+            # Clean up local file
+            os.remove(zip_path)
+            logger.info(f"Successfully uploaded {zip_filename} to S3")
 
-    # 5. Return success with the file URL
-    return {
-        "message": f"FOCUS-conformed CUR with {row_count} rows generated and validated!",
-        "url": file_url
-    }
+        # Return response with summary
+        return {
+            "message": f"FOCUS data generated successfully!",
+            "downloadUrl": file_url,
+            "fileSize": f"{len(files)} files",
+            "generationTime": "2-3 seconds",
+            "summary": summary
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to generate FOCUS data: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate FOCUS data: {str(e)}"
+        )
 
 @app.get("/files/{filename}")
 async def get_file(filename: str):
     if settings.environment == "development" and settings.s3_bucket_name == "local":
         # Local development - serve from files directory
         import os
-        from fastapi.responses import FileResponse
         
         files_dir = os.path.join(os.path.dirname(__file__), "files")
         file_path = os.path.join(files_dir, filename)
         
         if os.path.exists(file_path):
+            # Determine media type based on file extension
+            media_type = 'application/zip' if filename.endswith('.zip') else 'text/csv'
+            
             return FileResponse(
                 path=file_path,
                 filename=filename,
-                media_type='text/csv'
+                media_type=media_type
             )
         else:
             raise HTTPException(status_code=404, detail="File not found.")

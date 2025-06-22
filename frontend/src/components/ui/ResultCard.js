@@ -11,6 +11,12 @@ import { Button } from "./button";
 import { Card, CardContent } from "./card";
 
 const ResultCard = ({ response, rowCount, onDownload }) => {
+  // Debug logging
+  if (response) {
+    console.log('ResultCard response:', response);
+    console.log('Download URL:', response.downloadUrl);
+  }
+  
   return (
     <AnimatePresence>
       {response && (
@@ -71,18 +77,18 @@ const ResultCard = ({ response, rowCount, onDownload }) => {
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ delay: 0.8, type: "spring", stiffness: 200 }}
               >
-                <Button
-                  as="a"
-                  href={response.url}
+                <a
+                  href={response.downloadUrl}
                   download
-                  variant="glass"
-                  size="lg"
-                  className="group w-full bg-gradient-to-r from-green-500 to-emerald-600 text-white hover:from-green-600 hover:to-emerald-700 shadow-lg hover:shadow-xl"
-                  onClick={onDownload}
+                  onClick={(e) => {
+                    console.log('Download clicked, URL:', response.downloadUrl);
+                    if (onDownload) onDownload(e);
+                  }}
+                  className="inline-flex items-center justify-center whitespace-nowrap rounded-xl text-sm font-medium transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 h-11 px-8 bg-glass-light dark:bg-glass-dark-light backdrop-blur-md border border-white/20 dark:border-white/10 text-gray-700 dark:text-gray-200 shadow-glass hover:bg-glass-light/80 dark:hover:bg-glass-dark-light/80 hover:shadow-glass-inset group w-full bg-gradient-to-r from-green-500 to-emerald-600 text-white hover:from-green-600 hover:to-emerald-700 shadow-lg hover:shadow-xl"
                 >
                   <Download className="mr-2 h-5 w-5 group-hover:animate-bounce" />
                   Download Your Report
-                </Button>
+                </a>
               </motion.div>
               
               {/* Additional Info */}

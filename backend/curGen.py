@@ -38,7 +38,7 @@ def distribute_billed_cost(row_idx, row_count, total_dataset_cost):
     return round(base_per_row * factor, 2)
 
 
-def generate_value_for_column(col_name, row_idx, row_data, row_count, profile, total_dataset_cost, distribution="Evenly Distributed"):
+def generate_value_for_column(col_name, row_idx, row_data, row_count, profile, total_dataset_cost, distribution="Evenly Distributed", cloud_provider="AWS", billing_period=None):
     """
     Generates a single cell for a given column using the generator architecture.
     
@@ -60,6 +60,8 @@ def generate_value_for_column(col_name, row_idx, row_data, row_count, profile, t
         profile=profile,
         total_dataset_cost=total_dataset_cost,
         distribution=distribution,
+        cloud_provider=cloud_provider,
+        billing_period=billing_period,
         metadata=FOCUS_METADATA[col_name]
     )
     
@@ -171,7 +173,7 @@ def apply_distribution_post_processing(df, distribution):
     return df
 
 
-def generate_focus_data(row_count=10, profile="Greenfield", distribution="Evenly Distributed"):
+def generate_focus_data(row_count=10, profile="Greenfield", distribution="Evenly Distributed", cloud_provider="AWS", billing_period=None):
     """
     Generates a synthetic FOCUS dataset with refined logic for certain columns.
     
@@ -179,6 +181,8 @@ def generate_focus_data(row_count=10, profile="Greenfield", distribution="Evenly
         row_count: The number of rows to generate
         profile: The profile to use (Greenfield, Large Business, Enterprise)
         distribution: The distribution to use (Evenly Distributed, ML-Focused, Data-Intensive, Media-Intensive)
+        cloud_provider: The cloud provider (AWS, AZURE, GCP)
+        billing_period: The billing period (datetime object)
     
     Returns:
         A pandas DataFrame containing the generated data
@@ -186,7 +190,9 @@ def generate_focus_data(row_count=10, profile="Greenfield", distribution="Evenly
     logger.info("Starting FOCUS data generation", extra={
         "row_count": row_count,
         "profile": profile,
-        "distribution": distribution
+        "distribution": distribution,
+        "cloud_provider": cloud_provider,
+        "billing_period": billing_period.strftime("%Y-%m") if billing_period else None
     })
     # Step 1: Pick a total cost once for the entire dataset
     total_cost = generate_profile_total_cost(profile)
@@ -214,7 +220,9 @@ def generate_focus_data(row_count=10, profile="Greenfield", distribution="Evenly
                 row_count=row_count,
                 profile=profile,
                 total_dataset_cost=total_cost,
-                distribution=distribution
+                distribution=distribution,
+                cloud_provider=cloud_provider,
+                billing_period=billing_period
             )
             row_data[col_name] = val
         rows.append(row_data)

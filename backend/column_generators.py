@@ -18,6 +18,13 @@ from backend.logging_config import setup_logging
 
 logger = setup_logging(__name__)
 
+# Central provider mapping to ensure consistency across all generators
+CLOUD_PROVIDER_MAPPING = {
+    "AWS": "AWS",
+    "AZURE": "AZURE",
+    "GCP": "GCP"
+}
+
 
 @dataclass
 class GenerationContext:
@@ -29,7 +36,9 @@ class GenerationContext:
     profile: str
     total_dataset_cost: float
     distribution: str
-    metadata: Dict[str, Any]
+    cloud_provider: str = "AWS"
+    billing_period: Optional[datetime] = None
+    metadata: Dict[str, Any] = None
 
 
 class ColumnGenerator(ABC):
@@ -557,20 +566,20 @@ class LocationGenerator(ColumnGenerator):
     
     # Cloud provider regions and their availability zones
     REGIONS = {
-        "aws": {
+        "AWS": {
             "us-east-1": {"name": "US East (N. Virginia)", "zones": ["us-east-1a", "us-east-1b", "us-east-1c", "us-east-1d", "us-east-1f"]},
             "us-west-2": {"name": "US West (Oregon)", "zones": ["us-west-2a", "us-west-2b", "us-west-2c", "us-west-2d"]},
             "eu-west-1": {"name": "Europe (Ireland)", "zones": ["eu-west-1a", "eu-west-1b", "eu-west-1c"]},
             "ap-southeast-1": {"name": "Asia Pacific (Singapore)", "zones": ["ap-southeast-1a", "ap-southeast-1b", "ap-southeast-1c"]},
             "ca-central-1": {"name": "Canada (Central)", "zones": ["ca-central-1a", "ca-central-1b", "ca-central-1d"]},
         },
-        "azure": {
+        "AZURE": {
             "eastus": {"name": "East US", "zones": ["eastus-1", "eastus-2", "eastus-3"]},
             "westus": {"name": "West US", "zones": ["westus-1", "westus-2", "westus-3"]},
             "northeurope": {"name": "North Europe", "zones": ["northeurope-1", "northeurope-2", "northeurope-3"]},
             "southeastasia": {"name": "Southeast Asia", "zones": ["southeastasia-1", "southeastasia-2", "southeastasia-3"]},
         },
-        "gcp": {
+        "GCP": {
             "us-central1": {"name": "Iowa", "zones": ["us-central1-a", "us-central1-b", "us-central1-c", "us-central1-f"]},
             "us-east1": {"name": "South Carolina", "zones": ["us-east1-b", "us-east1-c", "us-east1-d"]},
             "europe-west1": {"name": "Belgium", "zones": ["europe-west1-b", "europe-west1-c", "europe-west1-d"]},
@@ -591,26 +600,14 @@ class LocationGenerator(ColumnGenerator):
         else:
             raise ValueError(f"Unsupported column: {context.col_name}")
     
-    def _get_provider_from_service(self, context: GenerationContext) -> str:
-        """Infer cloud provider from service category or default to AWS."""
-        service_cat = context.row_data.get("ServiceCategory", "")
-        service_name = context.row_data.get("ServiceName", "")
-        
-        # Simple heuristics to determine provider
-        if "azure" in service_name.lower() or "microsoft" in service_name.lower():
-            return "azure"
-        elif "google" in service_name.lower() or "gcp" in service_name.lower():
-            return "gcp"
-        else:
-            return "aws"  # Default to AWS
-    
     def _generate_region_id(self, context: GenerationContext) -> Optional[str]:
         """Generate region ID based on cloud provider."""
         if random.random() < 0.1:  # 10% chance of null for conditional field
             return None
             
-        provider = self._get_provider_from_service(context)
-        regions = list(self.REGIONS[provider].keys())
+        provider = CLOUD_PROVIDER_MAPPING.get(context.cloud_provider.upper() if context.cloud_provider else "AWS", "AWS")
+        provider_regions = self.REGIONS.get(provider, self.REGIONS["AWS"])
+        regions = list(provider_regions.keys())
         return random.choice(regions)
     
     def _generate_region_name(self, context: GenerationContext) -> Optional[str]:
@@ -619,8 +616,9 @@ class LocationGenerator(ColumnGenerator):
         if not region_id:
             return None if random.random() < 0.1 else "Unknown Region"
         
-        provider = self._get_provider_from_service(context)
-        region_info = self.REGIONS[provider].get(region_id, {})
+        provider = CLOUD_PROVIDER_MAPPING.get(context.cloud_provider.upper() if context.cloud_provider else "AWS", "AWS")
+        provider_regions = self.REGIONS.get(provider, self.REGIONS["AWS"])
+        region_info = provider_regions.get(region_id, {})
         return region_info.get("name", f"Region {region_id}")
     
     def _generate_availability_zone(self, context: GenerationContext) -> Optional[str]:
@@ -632,8 +630,9 @@ class LocationGenerator(ColumnGenerator):
         if not region_id:
             return None
         
-        provider = self._get_provider_from_service(context)
-        region_info = self.REGIONS[provider].get(region_id, {})
+        provider = CLOUD_PROVIDER_MAPPING.get(context.cloud_provider.upper() if context.cloud_provider else "AWS", "AWS")
+        provider_regions = self.REGIONS.get(provider, self.REGIONS["AWS"])
+        region_info = provider_regions.get(region_id, {})
         zones = region_info.get("zones", [f"{region_id}a", f"{region_id}b"])
         return random.choice(zones)
 
@@ -641,44 +640,34 @@ class LocationGenerator(ColumnGenerator):
 class ServiceDetailsGenerator(ColumnGenerator):
     """Handles detailed service information."""
     
-    # Service names mapped to service categories
-    SERVICE_NAMES = {
-        "Compute": [
-            "Amazon EC2", "Azure Virtual Machines", "Google Compute Engine",
-            "AWS Lambda", "Azure Functions", "Google Cloud Functions",
-            "Amazon ECS", "Azure Container Instances", "Google Cloud Run",
-            "AWS Batch", "Azure Batch", "Google Cloud Batch"
-        ],
-        "Storage": [
-            "Amazon S3", "Azure Blob Storage", "Google Cloud Storage",
-            "Amazon EBS", "Azure Disk Storage", "Google Persistent Disk",
-            "Amazon EFS", "Azure Files", "Google Filestore",
-            "Amazon Glacier", "Azure Archive Storage", "Google Cloud Archive"
-        ],
-        "Databases": [
-            "Amazon RDS", "Azure SQL Database", "Google Cloud SQL",
-            "Amazon DynamoDB", "Azure Cosmos DB", "Google Firestore",
-            "Amazon Redshift", "Azure Synapse", "Google BigQuery",
-            "Amazon ElastiCache", "Azure Cache for Redis", "Google Memorystore"
-        ],
-        "Networking": [
-            "Amazon VPC", "Azure Virtual Network", "Google VPC",
-            "AWS Direct Connect", "Azure ExpressRoute", "Google Cloud Interconnect",
-            "Amazon CloudFront", "Azure CDN", "Google Cloud CDN",
-            "AWS Load Balancer", "Azure Load Balancer", "Google Cloud Load Balancing"
-        ],
-        "AI and Machine Learning": [
-            "Amazon SageMaker", "Azure Machine Learning", "Google AI Platform",
-            "Amazon Comprehend", "Azure Cognitive Services", "Google Cloud AI",
-            "Amazon Rekognition", "Azure Computer Vision", "Google Cloud Vision",
-            "AWS Bedrock", "Azure OpenAI", "Google Vertex AI"
-        ],
-        "Other": [
-            "AWS IAM", "Azure Active Directory", "Google Cloud IAM",
-            "Amazon CloudWatch", "Azure Monitor", "Google Cloud Monitoring",
-            "AWS Config", "Azure Policy", "Google Cloud Asset Inventory"
-        ]
+    # Service names mapped by provider and service category
+    PROVIDER_SERVICE_NAMES = {
+        "AWS": {
+            "Compute": ["Amazon EC2", "AWS Lambda", "Amazon ECS", "AWS Batch", "Amazon Lightsail", "AWS Fargate"],
+            "Storage": ["Amazon S3", "Amazon EBS", "Amazon EFS", "Amazon Glacier", "AWS Storage Gateway", "AWS Backup"],
+            "Databases": ["Amazon RDS", "Amazon DynamoDB", "Amazon Redshift", "Amazon ElastiCache", "Amazon DocumentDB", "Amazon Neptune"],
+            "Networking": ["Amazon VPC", "AWS Direct Connect", "Amazon CloudFront", "AWS Load Balancer", "Amazon Route 53", "AWS Global Accelerator"],
+            "AI and Machine Learning": ["Amazon SageMaker", "Amazon Comprehend", "Amazon Rekognition", "AWS Bedrock", "Amazon Textract", "Amazon Forecast"],
+            "Other": ["AWS IAM", "Amazon CloudWatch", "AWS Config", "AWS CloudTrail", "AWS Systems Manager", "AWS Organizations"]
+        },
+        "AZURE": {
+            "Compute": ["Azure Virtual Machines", "Azure Functions", "Azure Container Instances", "Azure Batch", "Azure App Service", "Azure Kubernetes Service"],
+            "Storage": ["Azure Blob Storage", "Azure Disk Storage", "Azure Files", "Azure Archive Storage", "Azure Data Lake Storage", "Azure Backup"],
+            "Databases": ["Azure SQL Database", "Azure Cosmos DB", "Azure Synapse", "Azure Cache for Redis", "Azure Database for PostgreSQL", "Azure Database for MySQL"],
+            "Networking": ["Azure Virtual Network", "Azure ExpressRoute", "Azure CDN", "Azure Load Balancer", "Azure Traffic Manager", "Azure Front Door"],
+            "AI and Machine Learning": ["Azure Machine Learning", "Azure Cognitive Services", "Azure Computer Vision", "Azure OpenAI", "Azure Bot Service", "Azure Form Recognizer"],
+            "Other": ["Azure Active Directory", "Azure Monitor", "Azure Policy", "Azure Key Vault", "Azure Resource Manager", "Azure Cost Management"]
+        },
+        "GCP": {
+            "Compute": ["Google Compute Engine", "Google Cloud Functions", "Google Cloud Run", "Google Cloud Batch", "Google App Engine", "Google Kubernetes Engine"],
+            "Storage": ["Google Cloud Storage", "Google Persistent Disk", "Google Filestore", "Google Cloud Archive", "Google Cloud Backup", "Google Transfer Service"],
+            "Databases": ["Google Cloud SQL", "Google Firestore", "Google BigQuery", "Google Memorystore", "Google Cloud Spanner", "Google Bigtable"],
+            "Networking": ["Google VPC", "Google Cloud Interconnect", "Google Cloud CDN", "Google Cloud Load Balancing", "Google Cloud DNS", "Google Cloud Armor"],
+            "AI and Machine Learning": ["Google AI Platform", "Google Cloud AI", "Google Cloud Vision", "Google Vertex AI", "Google Cloud Natural Language", "Google Cloud Translation"],
+            "Other": ["Google Cloud IAM", "Google Cloud Monitoring", "Google Cloud Asset Inventory", "Google Cloud Security Command Center", "Google Cloud Deployment Manager", "Google Cloud Billing"]
+        }
     }
+    
     
     def supported_columns(self) -> List[str]:
         return ["ServiceName", "ServiceSubcategory"]
@@ -692,9 +681,14 @@ class ServiceDetailsGenerator(ColumnGenerator):
             raise ValueError(f"Unsupported column: {context.col_name}")
     
     def _generate_service_name(self, context: GenerationContext) -> str:
-        """Generate service name based on service category."""
+        """Generate service name based on cloud provider and service category."""
         service_cat = context.row_data.get("ServiceCategory", "Other")
-        services = self.SERVICE_NAMES.get(service_cat, self.SERVICE_NAMES["Other"])
+        provider = CLOUD_PROVIDER_MAPPING.get(context.cloud_provider.upper() if context.cloud_provider else "AWS", "AWS")
+        
+        # Get services for the specific provider and category
+        provider_services = self.PROVIDER_SERVICE_NAMES.get(provider, self.PROVIDER_SERVICE_NAMES["AWS"])
+        services = provider_services.get(service_cat, provider_services["Other"])
+        
         return random.choice(services)
     
     def _generate_service_subcategory(self, context: GenerationContext) -> str:
@@ -806,14 +800,17 @@ class ProviderBusinessGenerator(ColumnGenerator):
     # Cloud providers and their common publishers
     PROVIDERS = {
         "AWS": {
+            "name": "AWS",
             "publishers": ["Amazon Web Services", "AWS Marketplace", "Third Party"],
             "invoice_issuers": ["Amazon Web Services, Inc.", "AWS EMEA SARL", "AWS Asia Pacific"]
         },
-        "Microsoft Azure": {
+        "AZURE": {
+            "name": "Microsoft Azure",
             "publishers": ["Microsoft", "Azure Marketplace", "Third Party"],
             "invoice_issuers": ["Microsoft Corporation", "Microsoft Ireland", "Microsoft Singapore"]
         },
-        "Google Cloud": {
+        "GCP": {
+            "name": "Google Cloud",
             "publishers": ["Google", "Google Cloud Marketplace", "Third Party"],
             "invoice_issuers": ["Google LLC", "Google Cloud EMEA", "Google Asia Pacific"]
         }
@@ -832,36 +829,23 @@ class ProviderBusinessGenerator(ColumnGenerator):
         else:
             raise ValueError(f"Unsupported column: {context.col_name}")
     
-    def _get_provider_from_context(self, context: GenerationContext) -> str:
-        """Determine provider from service name or default to AWS."""
-        service_name = context.row_data.get("ServiceName", "")
-        region_id = context.row_data.get("RegionId", "")
-        
-        if "azure" in service_name.lower() or "microsoft" in service_name.lower():
-            return "Microsoft Azure"
-        elif "google" in service_name.lower() or "gcp" in service_name.lower():
-            return "Google Cloud"
-        elif region_id and region_id.startswith(("us-", "eu-", "ap-", "ca-")):
-            return "AWS"
-        else:
-            # Distribute across providers for realistic data
-            return random.choice(["AWS", "Microsoft Azure", "Google Cloud"])
-    
     def _generate_provider_name(self, context: GenerationContext) -> str:
-        """Generate provider name."""
-        return self._get_provider_from_context(context)
+        """Generate provider name based on cloud_provider parameter."""
+        provider_key = CLOUD_PROVIDER_MAPPING.get(context.cloud_provider.upper() if context.cloud_provider else "AWS", "AWS")
+        provider_info = self.PROVIDERS.get(provider_key, self.PROVIDERS["AWS"])
+        return provider_info["name"]
     
     def _generate_publisher_name(self, context: GenerationContext) -> str:
-        """Generate publisher name based on provider."""
-        provider = self._get_provider_from_context(context)
-        publishers = self.PROVIDERS[provider]["publishers"]
-        return random.choice(publishers)
+        """Generate publisher name based on cloud_provider parameter."""
+        provider_key = CLOUD_PROVIDER_MAPPING.get(context.cloud_provider.upper() if context.cloud_provider else "AWS", "AWS")
+        provider_info = self.PROVIDERS.get(provider_key, self.PROVIDERS["AWS"])
+        return random.choice(provider_info["publishers"])
     
     def _generate_invoice_issuer_name(self, context: GenerationContext) -> str:
-        """Generate invoice issuer name based on provider."""
-        provider = self._get_provider_from_context(context)
-        issuers = self.PROVIDERS[provider]["invoice_issuers"]
-        return random.choice(issuers)
+        """Generate invoice issuer name based on cloud_provider parameter."""
+        provider_key = CLOUD_PROVIDER_MAPPING.get(context.cloud_provider.upper() if context.cloud_provider else "AWS", "AWS")
+        provider_info = self.PROVIDERS.get(provider_key, self.PROVIDERS["AWS"])
+        return random.choice(provider_info["invoice_issuers"])
 
 
 class MetadataGenerator(ColumnGenerator):
