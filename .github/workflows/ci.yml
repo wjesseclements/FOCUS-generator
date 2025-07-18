@@ -60,7 +60,7 @@ jobs:
       - name: Run backend tests
         env:
           REDIS_URL: redis://localhost:6379
-          ENVIRONMENT: testing
+          ENVIRONMENT: development
           SECRET_KEY: test-secret-key
           CSRF_SECRET_KEY: test-csrf-key
         run: |
@@ -70,7 +70,7 @@ jobs:
       - name: Run integration tests
         env:
           REDIS_URL: redis://localhost:6379
-          ENVIRONMENT: testing
+          ENVIRONMENT: development
         run: |
           if [ -f integration_test.py ]; then
             python integration_test.py
