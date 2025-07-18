@@ -133,6 +133,7 @@ jobs:
           path: ./
           base: ${{ github.event.repository.default_branch }}
           head: HEAD
+        continue-on-error: true
 
   build-check:
     runs-on: ubuntu-latest

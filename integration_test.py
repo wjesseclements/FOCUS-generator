@@ -31,7 +31,7 @@ def test_python_path():
     
     # Add current directory to Python path
     current_dir = Path(__file__).parent
-    backend_dir = current_dir / "FOCUS-generator" / "backend"
+    backend_dir = current_dir / "backend" / "src"
     
     if str(backend_dir) not in sys.path:
         sys.path.insert(0, str(backend_dir))
@@ -45,7 +45,7 @@ def test_backend_imports():
     
     try:
         # Change to backend directory
-        backend_dir = Path(__file__).parent / "FOCUS-generator" / "backend"
+        backend_dir = Path(__file__).parent / "backend" / "src"
         os.chdir(backend_dir)
         
         # Test basic imports
@@ -75,7 +75,7 @@ def test_frontend_dependencies():
     """Test frontend dependencies."""
     print("Testing frontend dependencies...")
     
-    frontend_dir = Path(__file__).parent / "FOCUS-generator" / "frontend"
+    frontend_dir = Path(__file__).parent / "frontend"
     
     # Check if package.json exists
     package_json = frontend_dir / "package.json"
@@ -99,7 +99,7 @@ def test_configuration():
     print("Testing configuration management...")
     
     try:
-        backend_dir = Path(__file__).parent / "FOCUS-generator" / "backend"
+        backend_dir = Path(__file__).parent / "backend" / "src"
         os.chdir(backend_dir)
         
         from config import get_settings, apply_environment_config
@@ -127,7 +127,7 @@ def test_error_handling():
     print("Testing error handling system...")
     
     try:
-        backend_dir = Path(__file__).parent / "FOCUS-generator" / "backend"
+        backend_dir = Path(__file__).parent / "backend" / "src"
         os.chdir(backend_dir)
         
         from exceptions import ValidationError, DataGenerationError
@@ -190,13 +190,13 @@ def test_file_structure():
     
     # Expected files and directories
     expected_structure = {
-        "FOCUS-generator/backend/main.py": "Backend main application",
-        "FOCUS-generator/backend/config.py": "Configuration management",
-        "FOCUS-generator/backend/exceptions.py": "Custom exceptions",
-        "FOCUS-generator/backend/error_handler.py": "Error handling",
-        "FOCUS-generator/backend/retry_utils.py": "Retry utilities",
-        "FOCUS-generator/frontend/src/App.js": "Frontend main component",
-        "FOCUS-generator/frontend/package.json": "Frontend dependencies",
+        "backend/src/main.py": "Backend main application",
+        "backend/src/config.py": "Configuration management",
+        "backend/src/exceptions.py": "Custom exceptions",
+        "backend/src/error_handler.py": "Error handling",
+        "backend/src/retry_utils.py": "Retry utilities",
+        "frontend/src/App.js": "Frontend main component",
+        "frontend/package.json": "Frontend dependencies",
         "README.md": "Project documentation",
         "CHANGELOG.md": "Change log",
         ".gitignore": "Git ignore patterns",
@@ -267,7 +267,7 @@ def create_compatibility_report():
     
     if "frontend_dependencies" in failed_tests:
         report["recommendations"].append(
-            "Install frontend dependencies with: cd FOCUS-generator/frontend && npm install"
+            "Install frontend dependencies with: cd frontend && npm install"
         )
     
     if "git_integration" in failed_tests:
