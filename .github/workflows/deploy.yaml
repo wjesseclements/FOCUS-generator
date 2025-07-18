@@ -168,17 +168,35 @@ jobs:
             echo "✅ Reusing existing compatible layer: $EXISTING_LAYER"
           fi
 
-      - name: Update Lambda function code
+      - name: Create or update Lambda function
         run: |
-          # Update function code
-          aws lambda update-function-code \
-            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
-            --zip-file fileb://function.zip \
-            --publish
-          
-          # Wait for update to complete
-          aws lambda wait function-updated \
-            --function-name ${{ env.LAMBDA_FUNCTION_NAME }}
+          # Check if function exists
+          if aws lambda get-function --function-name ${{ env.LAMBDA_FUNCTION_NAME }} >/dev/null 2>&1; then
+            echo "Function exists, updating code..."
+            aws lambda update-function-code \
+              --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+              --zip-file fileb://function.zip \
+              --publish
+            
+            # Wait for update to complete
+            aws lambda wait function-updated \
+              --function-name ${{ env.LAMBDA_FUNCTION_NAME }}
+          else
+            echo "Function doesn't exist, creating..."
+            aws lambda create-function \
+              --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+              --runtime python3.11 \
+              --role arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/lambda-execution-role \
+              --handler main.handler \
+              --zip-file fileb://function.zip \
+              --timeout 900 \
+              --memory-size 3008 \
+              --publish
+              
+            # Wait for function to be active
+            aws lambda wait function-active \
+              --function-name ${{ env.LAMBDA_FUNCTION_NAME }}
+          fi
 
       - name: Update Lambda function configuration
         run: |
