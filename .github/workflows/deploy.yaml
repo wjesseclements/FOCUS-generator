@@ -225,10 +225,11 @@ jobs:
           # Try to create function URL
           aws lambda create-function-url-config \
             --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+            --auth-type NONE \
             --cors "{
               \"AllowOrigins\": $ALLOWED_ORIGINS,
-              \"AllowMethods\": [\"GET\", \"POST\", \"PUT\", \"DELETE\", \"OPTIONS\"],
-              \"AllowHeaders\": [\"Content-Type\", \"Authorization\", \"X-CSRF-Token\", \"X-Requested-With\"],
+              \"AllowMethods\": [\"*\"],
+              \"AllowHeaders\": [\"*\"],
               \"AllowCredentials\": true,
               \"MaxAge\": 86400
             }" || \
@@ -237,8 +238,8 @@ jobs:
             --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
             --cors "{
               \"AllowOrigins\": $ALLOWED_ORIGINS,
-              \"AllowMethods\": [\"GET\", \"POST\", \"PUT\", \"DELETE\", \"OPTIONS\"],
-              \"AllowHeaders\": [\"Content-Type\", \"Authorization\", \"X-CSRF-Token\", \"X-Requested-With\"],
+              \"AllowMethods\": [\"*\"],
+              \"AllowHeaders\": [\"*\"],
               \"AllowCredentials\": true,
               \"MaxAge\": 86400
             }"
