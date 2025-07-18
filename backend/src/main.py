@@ -456,3 +456,18 @@ async def external_service_error_handler(request: Request, exc: ExternalServiceE
 async def resource_limit_error_handler(request: Request, exc: ResourceLimitError):
     """Handle resource limit errors."""
     return ErrorHandler.handle_error_response(exc)
+
+
+# Lambda handler for AWS Lambda deployment
+try:
+    from mangum import Mangum
+    handler = Mangum(app, lifespan="off")
+except ImportError:
+    # Mangum not available, running in development mode
+    handler = None
+
+
+# For local development
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
