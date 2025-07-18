@@ -1,3 +1,13 @@
+
+import sys
+import os
+from pathlib import Path
+
+# Add backend src directory to Python path for CI compatibility
+backend_src = Path(__file__).parent
+if str(backend_src) not in sys.path:
+    sys.path.insert(0, str(backend_src))
+
 import uuid
 import logging
 import pandas as pd
@@ -7,27 +17,27 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 import boto3
 
-from .curGen import generate_focus_data
-from .validate_cur import validate_focus_df
-from .config import get_settings
-from .logging_config import setup_logging
-from .redis_rate_limiter import EnhancedRateLimitMiddleware
-from .csrf_protection import CSRFMiddleware
-from .models import GenerateCURRequest
-from .multi_file_generator import MultiFileGenerator
-from .streaming_csv import (
+from curGen import generate_focus_data
+from validate_cur import validate_focus_df
+from config import get_settings
+from logging_config import setup_logging
+from redis_rate_limiter import EnhancedRateLimitMiddleware
+from csrf_protection import CSRFMiddleware
+from models import GenerateCURRequest
+from multi_file_generator import MultiFileGenerator
+from streaming_csv import (
     StreamingDataGenerator, 
     StreamingConfig, 
     streaming_csv_response,
     create_data_generator,
     estimate_csv_size
 )
-from .error_handler import ErrorHandler, ErrorContext, handle_errors
-from .exceptions import (
+from error_handler import ErrorHandler, ErrorContext, handle_errors
+from exceptions import (
     ValidationError, DataGenerationError, FileOperationError, 
     ExternalServiceError, ResourceLimitError
 )
-from .retry_utils import retry_with_backoff, EXTERNAL_SERVICE_RETRY, FILE_OPERATION_RETRY
+from retry_utils import retry_with_backoff, EXTERNAL_SERVICE_RETRY, FILE_OPERATION_RETRY
 from datetime import datetime
 
 # Configure logging

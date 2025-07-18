@@ -15,21 +15,65 @@ def fix_imports_in_file(file_path):
     with open(file_path, 'r') as f:
         content = f.read()
     
-    # Pattern to match backend imports
-    pattern = r'from backend\.([a-zA-Z_][a-zA-Z0-9_]*) import'
-    replacement = r'from \1 import'
+    changes_made = False
     
-    # Replace imports
-    new_content = re.sub(pattern, replacement, content)
+    # Pattern 1: Fix backend.module imports to relative imports  
+    pattern1 = r'from backend\.([a-zA-Z_][a-zA-Z0-9_]*) import'
+    replacement1 = r'from \1 import'
     
-    # Count replacements
-    matches = re.findall(pattern, content)
-    if matches:
-        print(f"  Fixed {len(matches)} imports: {matches}")
+    matches1 = re.findall(pattern1, content)
+    if matches1:
+        content = re.sub(pattern1, replacement1, content)
+        print(f"  Fixed backend.module imports: {matches1}")
+        changes_made = True
+    
+    # Pattern 2: Fix relative imports to work in CI (for main.py specifically)
+    if file_path.name == 'main.py':
+        # Convert relative imports to absolute imports that work in CI
+        relative_patterns = [
+            (r'from \.([a-zA-Z_][a-zA-Z0-9_]*) import', r'from \1 import'),
+        ]
         
+        for pattern, replacement in relative_patterns:
+            matches = re.findall(pattern, content)
+            if matches:
+                content = re.sub(pattern, replacement, content)
+                print(f"  Fixed relative imports: {matches}")
+                changes_made = True
+    
+    # Pattern 3: Ensure proper module structure for CI environment
+    # Add Python path setup if needed
+    if file_path.name == 'main.py' and 'sys.path' not in content:
+        # Add path setup at the top of main.py
+        imports_section = content.split('\n')
+        insert_index = 0
+        
+        # Find where to insert the path setup
+        for i, line in enumerate(imports_section):
+            if line.strip().startswith('import ') or line.strip().startswith('from '):
+                insert_index = i
+                break
+        
+        path_setup = """
+import sys
+import os
+from pathlib import Path
+
+# Add backend src directory to Python path for CI compatibility
+backend_src = Path(__file__).parent
+if str(backend_src) not in sys.path:
+    sys.path.insert(0, str(backend_src))
+"""
+        
+        imports_section.insert(insert_index, path_setup)
+        content = '\n'.join(imports_section)
+        print("  Added Python path setup for CI compatibility")
+        changes_made = True
+    
+    if changes_made:
         # Write back to file
         with open(file_path, 'w') as f:
-            f.write(new_content)
+            f.write(content)
         
         return True
     else:
