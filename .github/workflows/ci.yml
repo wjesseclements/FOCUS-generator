@@ -33,14 +33,14 @@ jobs:
         uses: actions/cache@v3
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          key: ${{ runner.os }}-pip-${{ hashFiles('backend/requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-
 
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r backend/requirements.txt
 
       - name: Fix imports
         run: |
@@ -51,11 +51,11 @@ jobs:
       - name: Lint Python code
         run: |
           # Run flake8 with custom config for our project
-          flake8 FOCUS-generator/backend/ --config=.flake8 --exit-zero || true
+          flake8 backend/src/ --config=.flake8 --exit-zero || true
 
       - name: Type checking with mypy
         run: |
-          mypy FOCUS-generator/backend/ --ignore-missing-imports || true
+          mypy backend/src/ --ignore-missing-imports || true
 
       - name: Run backend tests
         env:
@@ -64,7 +64,7 @@ jobs:
           SECRET_KEY: test-secret-key
           CSRF_SECRET_KEY: test-csrf-key
         run: |
-          cd FOCUS-generator/backend
+          cd backend/src
           pytest -v --cov=. --cov-report=xml || true
 
       - name: Run integration tests
@@ -88,26 +88,26 @@ jobs:
         with:
           node-version: '18'
           cache: 'npm'
-          cache-dependency-path: FOCUS-generator/frontend/package-lock.json
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Install frontend dependencies
         run: |
-          cd FOCUS-generator/frontend
+          cd frontend
           npm ci
 
       - name: Lint frontend code
         run: |
-          cd FOCUS-generator/frontend
+          cd frontend
           npm run lint || true
 
       - name: Run frontend tests
         run: |
-          cd FOCUS-generator/frontend
+          cd frontend
           npm test -- --watchAll=false || true
 
       - name: Build frontend
         run: |
-          cd FOCUS-generator/frontend
+          cd frontend
           npm run build
 
   security-scan:
@@ -125,7 +125,7 @@ jobs:
       - name: Security scan with bandit
         run: |
           pip install bandit
-          bandit -r FOCUS-generator/backend/ -f json -o bandit-report.json || true
+          bandit -r backend/src/ -f json -o bandit-report.json || true
 
       - name: Check for secrets
         uses: trufflesecurity/trufflehog@main

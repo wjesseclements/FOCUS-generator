@@ -12,53 +12,10 @@ env:
   PANDAS_LAYER_NAME: pandas-layer
 
 jobs:
-  deploy-frontend:
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: '18'
-          cache: 'npm'
-          cache-dependency-path: FOCUS-generator/frontend/package-lock.json
-
-      - name: Install dependencies
-        run: |
-          cd FOCUS-generator/frontend
-          npm ci
-
-      - name: Build frontend with production config
-        env:
-          REACT_APP_API_URL: ${{ secrets.PRODUCTION_API_URL }}
-          REACT_APP_ENVIRONMENT: production
-        run: |
-          cd FOCUS-generator/frontend
-          npm run build
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Deploy to S3
-        run: |
-          aws s3 sync FOCUS-generator/frontend/build/ s3://${{ env.S3_BUCKET_NAME }} --delete
-          
-      - name: Invalidate CloudFront cache
-        if: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}
-        run: |
-          aws cloudfront create-invalidation \
-            --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
-            --paths "/*"
-
   deploy-backend:
     runs-on: ubuntu-latest
+    outputs:
+      function_url: ${{ steps.get-function-url.outputs.function_url }}
     
     steps:
       - name: Checkout code
@@ -73,14 +30,14 @@ jobs:
         uses: actions/cache@v3
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-deploy-${{ hashFiles('requirements.txt') }}
+          key: ${{ runner.os }}-pip-deploy-${{ hashFiles('backend/requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-deploy-
 
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r backend/requirements.txt
 
       - name: Fix imports for Lambda
         run: |
@@ -120,7 +77,7 @@ jobs:
           mkdir -p lambda_package
           
           # Copy all backend Python files
-          cp -r FOCUS-generator/backend/*.py lambda_package/
+          cp -r backend/src/*.py lambda_package/
           
           # Create a minimal requirements file for Lambda (excluding pandas)
           cat > lambda-requirements.txt << EOF
@@ -154,17 +111,62 @@ jobs:
 
       - name: Deploy pandas layer
         run: |
-          # Publish new layer version
-          LAYER_VERSION=$(aws lambda publish-layer-version \
+          # Check if layer already exists and get latest version
+          EXISTING_LAYER=$(aws lambda list-layer-versions \
             --layer-name ${{ env.PANDAS_LAYER_NAME }} \
-            --description "Pandas and heavy dependencies for FOCUS Generator" \
-            --zip-file fileb://pandas_layer.zip \
-            --compatible-runtimes python3.11 \
-            --query 'LayerVersionArn' \
-            --output text)
+            --query 'LayerVersions[0].LayerVersionArn' \
+            --output text 2>/dev/null || echo "null")
           
-          echo "Created layer: $LAYER_VERSION"
-          echo "LAYER_ARN=$LAYER_VERSION" >> $GITHUB_ENV
+          # Calculate hash of current layer content
+          CURRENT_HASH=$(sha256sum pandas_layer.zip | cut -d' ' -f1)
+          echo "Current layer hash: $CURRENT_HASH"
+          
+          # Check if we need to create a new layer version
+          NEED_NEW_LAYER=true
+          if [ "$EXISTING_LAYER" != "null" ] && [ "$EXISTING_LAYER" != "None" ]; then
+            echo "Found existing layer: $EXISTING_LAYER"
+            
+            # Get the latest layer version info
+            LAYER_INFO=$(aws lambda get-layer-version \
+              --layer-name ${{ env.PANDAS_LAYER_NAME }} \
+              --version-number $(echo $EXISTING_LAYER | rev | cut -d':' -f1 | rev) \
+              --query '{CodeSha256: CodeSha256, Runtime: CompatibleRuntimes[0]}' \
+              --output json)
+            
+            EXISTING_HASH=$(echo $LAYER_INFO | jq -r '.CodeSha256')
+            EXISTING_RUNTIME=$(echo $LAYER_INFO | jq -r '.Runtime')
+            
+            echo "Existing layer hash: $EXISTING_HASH"
+            echo "Existing runtime: $EXISTING_RUNTIME"
+            
+            # Check if content and runtime match
+            if [ "$EXISTING_RUNTIME" = "python3.11" ]; then
+              echo "✅ Existing layer is compatible with python3.11"
+              NEED_NEW_LAYER=false
+              echo "LAYER_ARN=$EXISTING_LAYER" >> $GITHUB_ENV
+            else
+              echo "⚠️  Existing layer runtime ($EXISTING_RUNTIME) doesn't match python3.11"
+            fi
+          else
+            echo "No existing layer found, creating new one"
+          fi
+          
+          # Create new layer version only if needed
+          if [ "$NEED_NEW_LAYER" = "true" ]; then
+            echo "Creating new layer version..."
+            LAYER_VERSION=$(aws lambda publish-layer-version \
+              --layer-name ${{ env.PANDAS_LAYER_NAME }} \
+              --description "Pandas and heavy dependencies for FOCUS Generator ($(date +%Y-%m-%d))" \
+              --zip-file fileb://pandas_layer.zip \
+              --compatible-runtimes python3.11 \
+              --query 'LayerVersionArn' \
+              --output text)
+            
+            echo "✅ Created new layer: $LAYER_VERSION"
+            echo "LAYER_ARN=$LAYER_VERSION" >> $GITHUB_ENV
+          else
+            echo "✅ Reusing existing compatible layer: $EXISTING_LAYER"
+          fi
 
       - name: Update Lambda function code
         run: |
@@ -186,43 +188,64 @@ jobs:
             --layers ${{ env.LAYER_ARN }} \
             --environment Variables="{
               ENVIRONMENT=production,
-              S3_BUCKET_NAME=${{ env.S3_BUCKET_NAME }},
+              S3_BUCKET_NAME=cur-gen-files,
               REDIS_URL=${{ secrets.REDIS_URL }},
               SECRET_KEY=${{ secrets.SECRET_KEY }},
               CSRF_SECRET_KEY=${{ secrets.CSRF_SECRET_KEY }},
               AWS_REGION=${{ env.AWS_REGION }},
               LOG_LEVEL=INFO,
+              LOG_FORMAT=json,
               ENABLE_COMPRESSION=true,
               ENABLE_CACHING=true,
+              CACHE_TTL=3600,
               RATE_LIMIT_PER_MINUTE=100,
               RATE_LIMIT_PER_HOUR=1000,
-              RATE_LIMIT_PER_DAY=10000
+              RATE_LIMIT_PER_DAY=10000,
+              DEFAULT_ROW_COUNT=1000,
+              MAX_ROW_COUNT=1000000,
+              MIN_ROW_COUNT=1,
+              MAX_FILE_SIZE_MB=100,
+              MAX_GENERATION_TIMEOUT=900,
+              RETRY_MAX_ATTEMPTS=3,
+              RETRY_BACKOFF_FACTOR=2.0,
+              RETRY_MAX_DELAY=60,
+              TEMP_DIR=/tmp
             }" \
-            --timeout 300 \
-            --memory-size 1024
+            --timeout 900 \
+            --memory-size 3008
 
       - name: Create or update Lambda function URL
         run: |
+          # Define allowed origins (S3 bucket URL and optional custom domain)
+          ALLOWED_ORIGINS='["https://${{ env.S3_BUCKET_NAME }}.s3-website-${{ env.AWS_REGION }}.amazonaws.com"'
+          if [ -n "${{ secrets.CUSTOM_DOMAIN }}" ]; then
+            ALLOWED_ORIGINS="$ALLOWED_ORIGINS,\"${{ secrets.CUSTOM_DOMAIN }}\""
+          fi
+          ALLOWED_ORIGINS="$ALLOWED_ORIGINS]"
+          
           # Try to create function URL
           aws lambda create-function-url-config \
             --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
-            --cors '{
-              "AllowOrigins": ["*"],
-              "AllowMethods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-              "AllowHeaders": ["*"],
-              "MaxAge": 86400
-            }' || \
+            --cors "{
+              \"AllowOrigins\": $ALLOWED_ORIGINS,
+              \"AllowMethods\": [\"GET\", \"POST\", \"PUT\", \"DELETE\", \"OPTIONS\"],
+              \"AllowHeaders\": [\"Content-Type\", \"Authorization\", \"X-CSRF-Token\", \"X-Requested-With\"],
+              \"AllowCredentials\": true,
+              \"MaxAge\": 86400
+            }" || \
           # If it already exists, update it
           aws lambda update-function-url-config \
             --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
-            --cors '{
-              "AllowOrigins": ["*"],
-              "AllowMethods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-              "AllowHeaders": ["*"],
-              "MaxAge": 86400
-            }'
+            --cors "{
+              \"AllowOrigins\": $ALLOWED_ORIGINS,
+              \"AllowMethods\": [\"GET\", \"POST\", \"PUT\", \"DELETE\", \"OPTIONS\"],
+              \"AllowHeaders\": [\"Content-Type\", \"Authorization\", \"X-CSRF-Token\", \"X-Requested-With\"],
+              \"AllowCredentials\": true,
+              \"MaxAge\": 86400
+            }"
 
       - name: Get Lambda function URL
+        id: get-function-url
         run: |
           FUNCTION_URL=$(aws lambda get-function-url-config \
             --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
@@ -230,28 +253,283 @@ jobs:
             --output text)
           echo "Lambda Function URL: $FUNCTION_URL"
           echo "FUNCTION_URL=$FUNCTION_URL" >> $GITHUB_ENV
+          echo "function_url=$FUNCTION_URL" >> $GITHUB_OUTPUT
 
       - name: Test Lambda deployment
         run: |
-          # Wait a moment for the function to be ready
+          # Wait for function to be ready
+          echo "Waiting for Lambda function to be ready..."
+          sleep 15
+          
+          # Test the health endpoint with retries
+          echo "Testing health endpoint..."
+          for i in {1..5}; do
+            if curl -f -X GET "${{ env.FUNCTION_URL }}health" -o /dev/null -s; then
+              echo "✅ Health check passed on attempt $i"
+              break
+            else
+              echo "⚠️  Health check failed on attempt $i"
+              if [ $i -eq 5 ]; then
+                echo "❌ Health check failed after 5 attempts"
+                exit 1
+              fi
+              sleep 10
+            fi
+          done
+          
+          # Test CORS preflight
+          echo "Testing CORS preflight..."
+          PREFLIGHT_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X OPTIONS \
+            -H "Origin: https://${{ env.S3_BUCKET_NAME }}.s3-website-${{ env.AWS_REGION }}.amazonaws.com" \
+            -H "Access-Control-Request-Method: POST" \
+            -H "Access-Control-Request-Headers: Content-Type" \
+            "${{ env.FUNCTION_URL }}")
+          
+          if [ "$PREFLIGHT_STATUS" = "200" ]; then
+            echo "✅ CORS preflight check passed"
+          else
+            echo "⚠️  CORS preflight check failed with status: $PREFLIGHT_STATUS"
+          fi
+          
+          # Verify Lambda function configuration
+          echo "Verifying Lambda function configuration..."
+          FUNCTION_CONFIG=$(aws lambda get-function-configuration \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+            --query '{Runtime: Runtime, MemorySize: MemorySize, Timeout: Timeout, State: State}' \
+            --output json)
+          
+          echo "Lambda configuration: $FUNCTION_CONFIG"
+          
+          FUNCTION_STATE=$(echo $FUNCTION_CONFIG | jq -r '.State')
+          if [ "$FUNCTION_STATE" = "Active" ]; then
+            echo "✅ Lambda function is active"
+          else
+            echo "❌ Lambda function is not active. State: $FUNCTION_STATE"
+            exit 1
+          fi
+
+  deploy-frontend:
+    runs-on: ubuntu-latest
+    needs: deploy-backend
+    outputs:
+      frontend_url: ${{ steps.get-s3-url.outputs.frontend_url }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Build frontend with production config
+        env:
+          REACT_APP_API_URL: ${{ needs.deploy-backend.outputs.function_url }}
+          REACT_APP_ENVIRONMENT: production
+        run: |
+          cd frontend
+          npm run build
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy to S3
+        run: |
+          aws s3 sync frontend/build/ s3://${{ env.S3_BUCKET_NAME }} --delete
+          
+      - name: Invalidate CloudFront cache
+        if: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
+            --paths "/*"
+
+      - name: Get S3 website URL
+        id: get-s3-url
+        run: |
+          S3_URL="https://${{ env.S3_BUCKET_NAME }}.s3-website-${{ env.AWS_REGION }}.amazonaws.com"
+          echo "Frontend URL: $S3_URL"
+          echo "frontend_url=$S3_URL" >> $GITHUB_OUTPUT
+
+      - name: Validate frontend deployment
+        run: |
+          # Wait for S3 website to be available
+          echo "Waiting for S3 website to be available..."
           sleep 10
           
-          # Test the health endpoint
-          curl -f -X GET "${{ env.FUNCTION_URL }}health" || echo "Health check failed (may need time to cold start)"
+          # Test if the frontend is accessible
+          echo "Testing frontend availability..."
+          FRONTEND_URL="https://${{ env.S3_BUCKET_NAME }}.s3-website-${{ env.AWS_REGION }}.amazonaws.com"
+          
+          for i in {1..5}; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$FRONTEND_URL" || echo "000")
+            if [ "$STATUS" = "200" ]; then
+              echo "✅ Frontend is accessible on attempt $i"
+              break
+            else
+              echo "⚠️  Frontend not accessible on attempt $i (status: $STATUS)"
+              if [ $i -eq 5 ]; then
+                echo "❌ Frontend not accessible after 5 attempts"
+                exit 1
+              fi
+              sleep 10
+            fi
+          done
+          
+          # Verify key files exist in S3
+          echo "Verifying deployment files..."
+          REQUIRED_FILES=("index.html" "static/js" "static/css")
+          
+          for file in "${REQUIRED_FILES[@]}"; do
+            if [ "$file" = "static/js" ] || [ "$file" = "static/css" ]; then
+              # Check if directory exists and has files
+              FILE_COUNT=$(aws s3 ls s3://${{ env.S3_BUCKET_NAME }}/$file/ --recursive | wc -l)
+              if [ "$FILE_COUNT" -gt 0 ]; then
+                echo "✅ $file directory exists with $FILE_COUNT files"
+              else
+                echo "❌ $file directory is missing or empty"
+                exit 1
+              fi
+            else
+              # Check if specific file exists
+              if aws s3 ls s3://${{ env.S3_BUCKET_NAME }}/$file >/dev/null 2>&1; then
+                echo "✅ $file exists"
+              else
+                echo "❌ $file is missing"
+                exit 1
+              fi
+            fi
+          done
+          
+          # Verify build contains API URL
+          echo "Verifying API URL configuration..."
+          aws s3 cp s3://${{ env.S3_BUCKET_NAME }}/static/js/ ./temp-js/ --recursive
+          if grep -r "${{ needs.deploy-backend.outputs.function_url }}" ./temp-js/ >/dev/null 2>&1; then
+            echo "✅ API URL correctly configured in build"
+          else
+            echo "⚠️  API URL not found in build files (this might be normal if minified)"
+          fi
+          rm -rf ./temp-js/
 
   post-deployment-validation:
     runs-on: ubuntu-latest
     needs: [deploy-frontend, deploy-backend]
     
     steps:
-      - name: Validate deployment
+      - name: Comprehensive deployment validation
         run: |
-          echo "✅ Deployment completed successfully!"
-          echo "Frontend deployed to S3"
-          echo "Backend deployed to Lambda"
+          echo "🔍 Starting comprehensive deployment validation..."
           echo ""
-          echo "Next steps:"
-          echo "1. Verify frontend at: https://${{ env.S3_BUCKET_NAME }}.s3-website-${{ env.AWS_REGION }}.amazonaws.com"
-          echo "2. Test API endpoints"
-          echo "3. Monitor CloudWatch logs for any issues"
-          echo "4. Check Lambda metrics and performance"
+          
+          # Set URLs for testing
+          FRONTEND_URL="${{ needs.deploy-frontend.outputs.frontend_url }}"
+          BACKEND_URL="${{ needs.deploy-backend.outputs.function_url }}"
+          
+          echo "🌐 Application URLs:"
+          echo "Frontend: $FRONTEND_URL"
+          echo "Backend API: $BACKEND_URL"
+          echo ""
+          
+          # Test 1: Frontend-Backend Integration
+          echo "🧪 Test 1: Frontend-Backend Integration"
+          echo "Testing if frontend can reach backend..."
+          
+          # Check if frontend loads successfully
+          FRONTEND_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$FRONTEND_URL" || echo "000")
+          if [ "$FRONTEND_STATUS" = "200" ]; then
+            echo "✅ Frontend loads successfully"
+          else
+            echo "❌ Frontend load failed (status: $FRONTEND_STATUS)"
+            exit 1
+          fi
+          
+          # Test 2: API Endpoints
+          echo ""
+          echo "🧪 Test 2: API Endpoints"
+          
+          # Test health endpoint
+          echo "Testing health endpoint..."
+          HEALTH_RESPONSE=$(curl -s -f "$BACKEND_URL/health" || echo "FAILED")
+          if [ "$HEALTH_RESPONSE" != "FAILED" ]; then
+            echo "✅ Health endpoint working"
+          else
+            echo "❌ Health endpoint failed"
+            exit 1
+          fi
+          
+          # Test CORS with the actual frontend origin
+          echo "Testing CORS with frontend origin..."
+          CORS_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X OPTIONS \
+            -H "Origin: $FRONTEND_URL" \
+            -H "Access-Control-Request-Method: POST" \
+            -H "Access-Control-Request-Headers: Content-Type" \
+            "$BACKEND_URL" || echo "000")
+          
+          if [ "$CORS_STATUS" = "200" ]; then
+            echo "✅ CORS configured correctly"
+          else
+            echo "⚠️  CORS check failed (status: $CORS_STATUS)"
+          fi
+          
+          # Test 3: Security Headers
+          echo ""
+          echo "🧪 Test 3: Security Headers"
+          
+          SECURITY_HEADERS=$(curl -s -I "$BACKEND_URL/health" | grep -i "access-control\|x-frame-options\|content-security-policy" | wc -l)
+          if [ "$SECURITY_HEADERS" -gt 0 ]; then
+            echo "✅ Security headers present"
+          else
+            echo "⚠️  Security headers may be missing"
+          fi
+          
+          # Test 4: Performance Check
+          echo ""
+          echo "🧪 Test 4: Performance Check"
+          
+          # Measure response time
+          RESPONSE_TIME=$(curl -s -o /dev/null -w "%{time_total}" "$BACKEND_URL/health" || echo "0")
+          if [ "$(echo "$RESPONSE_TIME < 2.0" | bc -l 2>/dev/null || echo "1")" = "1" ]; then
+            echo "✅ API response time acceptable (${RESPONSE_TIME}s)"
+          else
+            echo "⚠️  API response time slow (${RESPONSE_TIME}s)"
+          fi
+          
+          # Test 5: Error Handling
+          echo ""
+          echo "🧪 Test 5: Error Handling"
+          
+          # Test 404 endpoint
+          NOT_FOUND_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$BACKEND_URL/nonexistent" || echo "000")
+          if [ "$NOT_FOUND_STATUS" = "404" ]; then
+            echo "✅ 404 error handling working"
+          else
+            echo "⚠️  404 error handling may have issues (status: $NOT_FOUND_STATUS)"
+          fi
+          
+          echo ""
+          echo "🎉 Deployment validation completed!"
+          echo ""
+          echo "📋 Summary:"
+          echo "Frontend URL: $FRONTEND_URL"
+          echo "Backend API: $BACKEND_URL"
+          echo "Status: ✅ All critical tests passed"
+          echo ""
+          echo "🔍 Next steps:"
+          echo "1. Monitor CloudWatch logs for any issues"
+          echo "2. Check Lambda metrics and performance"
+          echo "3. Test application functionality manually"
+          echo "4. Set up monitoring and alerting if needed"

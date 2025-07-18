@@ -1,6 +1,8 @@
 # A dictionary containing all 50 columns of the FOCUS v1.1 spec.
 # Each key is a column_name, and each value is a dict with metadata.
 
+from typing import Dict, Any, Optional
+
 FOCUS_METADATA = {
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     #  2.1  AvailabilityZone
@@ -1007,7 +1009,7 @@ FOCUS_METADATA = {
 
 
 # Provide helper functions to retrieve metadata for validation or generation purposes.
-def get_column_metadata(column_name):
+def get_column_metadata(column_name: str) -> Optional[Dict[str, Any]]:
     """
     Retrieve metadata for a specific column.
     """

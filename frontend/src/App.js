@@ -1,144 +1,302 @@
-import React, { useState } from "react";
-import axios from "axios";
-import Tippy from "@tippyjs/react";
-import "tippy.js/dist/tippy.css"; // Tippy's default styles
+import React, { useCallback, useMemo } from "react";
+import { toast } from "sonner";
+import { AnimatePresence } from "framer-motion";
 
-export default function App() {
-  const [selectedProfile, setSelectedProfile] = useState(""); // No default selection
-  const [distribution, setDistribution] = useState(""); // No default selection
-  const [response, setResponse] = useState(null); // Stores the response
-  const [isReset, setIsReset] = useState(false); // Tracks whether the button is in "Reset" mode
+// Error Boundaries
+import ErrorBoundary from "./components/ErrorBoundary";
+import AsyncErrorBoundary from "./components/AsyncErrorBoundary";
 
-  const generateCUR = async () => {
-    try {
-      const res = await axios.post("http://127.0.0.1:8000/generate-cur", {
-        profile: selectedProfile,
-        distribution: distribution || "Evenly Distributed", // Default to "Evenly Distributed" if none selected
-      });
-      setResponse(res.data);
-      setIsReset(true); // Switch button to Reset mode
-    } catch (error) {
-      console.error("Error generating CUR:", error);
+// Context
+import { ThemeProvider, useTheme } from "./contexts/ThemeContext";
+
+// Components
+import HeroSection from "./components/sections/HeroSection";
+import ProfileSelection from "./components/sections/ProfileSelection";
+import DistributionSelection from "./components/sections/DistributionSelection";
+import RowCountSelector from "./components/forms/RowCountSelector";
+import CloudProviderSelector from "./components/ui/CloudProviderSelector";
+import TrendOptions from "./components/ui/TrendOptions";
+import GenerateButton from "./components/ui/GenerateButton";
+import ResultCard from "./components/ui/ResultCard";
+import Footer from "./components/sections/Footer";
+import { Toaster } from "./components/ui/toaster";
+import DarkModeToggle from "./components/ui/DarkModeToggle";
+import { LoadingSkeleton } from "./components/ui/LoadingSkeleton";
+import CURVisualization from "./components/sections/CURVisualization";
+
+// Animations
+import { 
+  AppEntrance, 
+  PageTransition, 
+  StaggeredContainer, 
+  FloatingElement 
+} from "./components/animations/PageTransition";
+import { MagneticCard } from "./components/ui/MicroInteractions";
+
+// Hooks
+import { useFocusGenerator } from "./hooks/useFocusGenerator";
+
+function AppContent() {
+  const { isLoaded } = useTheme();
+  const [showContent, setShowContent] = React.useState(false);
+  const [selectedProviders, setSelectedProviders] = React.useState(['aws']);
+  const [multiMonth, setMultiMonth] = React.useState(false);
+  const [trendOptions, setTrendOptions] = React.useState({
+    monthCount: 6,
+    scenario: "linear",
+    parameters: {}
+  });
+  const [showVisualization, setShowVisualization] = React.useState(false);
+  const [csvData, setCsvData] = React.useState(null);
+  
+  const {
+    selectedProfile,
+    setSelectedProfile,
+    distribution,
+    setDistribution,
+    rowCount,
+    handleRowCountChange,
+    response,
+    isReset,
+    isLoading,
+    generateCUR,
+    resetSelections
+  } = useFocusGenerator();
+
+  // Show content after theme is loaded to prevent flash
+  React.useEffect(() => {
+    if (isLoaded) {
+      const timer = setTimeout(() => setShowContent(true), 100);
+      return () => clearTimeout(timer);
     }
-  };
+  }, [isLoaded]);
 
-  const resetSelections = () => {
-    setSelectedProfile("");
-    setDistribution("");
-    setResponse(null);
-    setIsReset(false); // Revert button to Generate CUR mode
-  };
+  // Event handlers with useCallback for performance
+  const handleProviderToggle = useCallback((providers) => {
+    setSelectedProviders(providers);
+  }, []);
+
+  const handleProfileSelect = useCallback((profile) => {
+    setSelectedProfile(profile);
+  }, [setSelectedProfile]);
+
+  const handleDistributionSelect = useCallback((dist) => {
+    setDistribution(dist);
+  }, [setDistribution]);
+
+  const handleTrendOptionsChange = useCallback((options) => {
+    setTrendOptions(options);
+  }, []);
+
+  const handleMultiMonthToggle = useCallback((e) => {
+    setMultiMonth(e.target.checked);
+  }, []);
+
+  const handleVisualizationToggle = useCallback(() => {
+    setShowVisualization(prev => !prev);
+  }, []);
+
+  const handleGenerateCUR = useCallback(() => {
+    generateCUR(selectedProviders, trendOptions, multiMonth);
+  }, [generateCUR, selectedProviders, trendOptions, multiMonth]);
+
+  const handleDownload = useCallback(() => {
+    toast.success("Download started!", {
+      description: "Your FOCUS CUR file is being downloaded."
+    });
+  }, []);
+
+  // Parse CSV data from response
+  const parseCSVData = useCallback((csvText) => {
+    const lines = csvText.trim().split('\n');
+    const headers = lines[0].split(',').map(h => h.trim());
+    
+    const data = [];
+    for (let i = 1; i < lines.length; i++) {
+      const values = lines[i].split(',');
+      const row = {};
+      headers.forEach((header, index) => {
+        row[header] = values[index]?.trim() || '';
+      });
+      data.push(row);
+    }
+    return data;
+  }, []);
+
+  // Memoize CSV URL calculation
+  const csvUrl = useMemo(() => {
+    if (!response?.downloadUrl) return null;
+    return response.downloadUrl.endsWith('.zip') 
+      ? response.downloadUrl + '/csv'
+      : response.downloadUrl;
+  }, [response?.downloadUrl]);
+
+  // Fetch and parse CSV when response is available
+  React.useEffect(() => {
+    if (csvUrl) {
+      // Reset visualization state when new data is generated
+      setShowVisualization(false);
+      
+      // Fetch the CSV data
+      fetch(csvUrl)
+        .then(res => res.text())
+        .then(csvText => {
+          const parsedData = parseCSVData(csvText);
+          setCsvData(parsedData);
+        })
+        .catch(err => {
+          console.error("Error fetching CSV data:", err);
+          toast.error("Could not load data for visualization");
+        });
+    }
+  }, [csvUrl, parseCSVData]);
+
+  if (!showContent) {
+    return <LoadingSkeleton variant="cards" />;
+  }
 
   return (
-    <div className="min-h-screen bg-blue-50 flex flex-col items-center pb-16">
-      {/* Hero Section */}
-      <div className="bg-gradient-to-r from-blue-500 to-blue-700 text-white py-10 px-4 text-center w-full">
-        <h1 className="text-5xl font-bold mb-2">FOCUS CUR Generator</h1>
-        <p className="text-lg">
-          Quickly generate synthetic FOCUS-conformed Cost and Usage Reports for
-          your testing and FinOps needs.
-        </p>
-      </div>
-
-      {/* Profile Selection with Tooltips */}
-      <div className="my-6 text-center">
-        <p className="text-lg font-medium mb-4">Select Profile:</p>
-        <div className="flex flex-wrap justify-center gap-4">
-          {[
-            {
-              name: "Greenfield",
-              description: "For startups or small businesses ($20k–$50k/month).",
-            },
-            {
-              name: "Large Business",
-              description:
-                "For medium-sized organizations ($100k–$250k/month).",
-            },
-            {
-              name: "Enterprise",
-              description: "For large corporations ($1M+/month).",
-            },
-          ].map((profile) => (
-            <Tippy content={profile.description} key={profile.name} arrow={true}>
-              <button
-                onClick={() => setSelectedProfile(profile.name)}
-                className={`px-4 py-2 rounded shadow ${
-                  selectedProfile === profile.name
-                    ? "bg-blue-600 text-white"
-                    : "bg-white text-blue-600 border border-blue-600 hover:bg-blue-100"
-                }`}
-              >
-                {profile.name}
-              </button>
-            </Tippy>
-          ))}
+    <AppEntrance>
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-dark-bg dark:to-dark-surface overflow-hidden transition-colors duration-500">
+        {/* Dark mode toggle */}
+        <DarkModeToggle className="fixed top-6 right-6 z-50" />
+        
+        {/* Animated background elements */}
+        <div className="fixed inset-0 overflow-hidden pointer-events-none">
+          <div className="absolute -top-40 -right-40 w-80 h-80 bg-gradient-radial opacity-30 dark:opacity-20 blur-3xl animate-pulse-slow" />
+          <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-gradient-radial opacity-20 dark:opacity-10 blur-3xl animate-pulse-slow" style={{ animationDelay: '2s' }} />
         </div>
+
+        {/* Main content */}
+        <PageTransition className="relative z-10 min-h-screen flex flex-col items-center pb-24">
+          {/* Hero Section */}
+          <FloatingElement>
+            <HeroSection />
+          </FloatingElement>
+
+          {/* Main Content Container with Async Error Boundary */}
+          <AsyncErrorBoundary>
+            <StaggeredContainer className="w-full max-w-6xl px-4 mt-8 space-y-8">
+              {/* Cloud Provider Selection */}
+              <MagneticCard>
+                <CloudProviderSelector
+                  selectedProviders={selectedProviders}
+                  onProviderToggle={handleProviderToggle}
+                />
+              </MagneticCard>
+
+              {/* Profile Selection */}
+              <MagneticCard>
+                <ProfileSelection 
+                  selectedProfile={selectedProfile}
+                  onProfileSelect={handleProfileSelect}
+                />
+              </MagneticCard>
+
+              {/* Distribution Selection */}
+              <MagneticCard>
+                <DistributionSelection 
+                  selectedDistribution={distribution}
+                  onDistributionSelect={handleDistributionSelect}
+                />
+              </MagneticCard>
+
+              {/* Row Count Selector */}
+              <FloatingElement delay={0.6}>
+                <RowCountSelector 
+                  rowCount={rowCount}
+                  onRowCountChange={handleRowCountChange}
+                  onInputChange={(e) => handleRowCountChange(e.target.value)}
+                />
+              </FloatingElement>
+
+              {/* Multi-Month Toggle */}
+              <FloatingElement delay={0.7}>
+                <div className="max-w-lg mx-auto">
+                  <label className="flex items-center justify-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={multiMonth}
+                      onChange={handleMultiMonthToggle}
+                      className="sr-only peer"
+                    />
+                    <div className="relative w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/25 dark:peer-focus:ring-primary/50 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-primary"></div>
+                    <span className="ml-3 text-sm font-medium text-gray-900 dark:text-gray-300">
+                      Generate Multiple Months
+                    </span>
+                  </label>
+                </div>
+              </FloatingElement>
+
+              {/* Trend Options - Show when multiMonth is enabled */}
+              <AnimatePresence>
+                {multiMonth && (
+                  <FloatingElement delay={0.75}>
+                    <TrendOptions onOptionsChange={handleTrendOptionsChange} />
+                  </FloatingElement>
+                )}
+              </AnimatePresence>
+
+              {/* Generate Button */}
+              <FloatingElement delay={0.8}>
+                <GenerateButton 
+                  onGenerate={handleGenerateCUR}
+                  onReset={resetSelections}
+                  isLoading={isLoading}
+                  isReset={isReset}
+                  canGenerate={selectedProfile && distribution && selectedProviders.length > 0}
+                  multiMonth={multiMonth}
+                />
+              </FloatingElement>
+
+              {/* Loading State */}
+              <AnimatePresence>
+                {isLoading && (
+                  <LoadingSkeleton variant="generating" />
+                )}
+              </AnimatePresence>
+
+              {/* Success Response */}
+              <ResultCard 
+                response={response}
+                rowCount={rowCount}
+                onDownload={handleDownload}
+                showVisualization={showVisualization}
+                onToggleVisualization={handleVisualizationToggle}
+              />
+
+              {/* CUR Visualization */}
+              <AnimatePresence>
+                {showVisualization && csvData && (
+                  <FloatingElement delay={0.2}>
+                    <CURVisualization data={csvData} />
+                  </FloatingElement>
+                )}
+              </AnimatePresence>
+            </StaggeredContainer>
+          </AsyncErrorBoundary>
+        </PageTransition>
+
+        {/* Footer */}
+        <Footer />
+        
+        {/* Toast Notifications */}
+        <Toaster 
+          position="top-right"
+          expand={true}
+          richColors={true}
+        />
       </div>
+    </AppEntrance>
+  );
+}
 
-      {/* Distribution Selection with Tooltips */}
-      <div className="mb-6 text-center">
-        <p className="text-lg font-medium mb-4">Select Distribution:</p>
-        <div className="flex flex-wrap justify-center gap-4">
-          {[
-            { name: "Evenly Distributed", description: "Evenly spread across services." },
-            { name: "ML-Focused", description: "Emphasizing SageMaker and ML workloads." },
-            { name: "Data-Intensive", description: "Focus on S3, Redshift, and data-heavy services." },
-            { name: "Media-Intensive", description: "Optimized for high storage and bandwidth needs." },
-          ].map((dist) => (
-            <Tippy content={dist.description} key={dist.name} arrow={true}>
-              <button
-                onClick={() => setDistribution(dist.name)}
-                className={`px-4 py-2 rounded shadow ${
-                  distribution === dist.name
-                    ? "bg-blue-600 text-white"
-                    : "bg-white text-blue-600 border border-blue-600 hover:bg-blue-100"
-                }`}
-              >
-                {dist.name}
-              </button>
-            </Tippy>
-          ))}
-        </div>
-      </div>
-
-      {/* Generate/Reset Button */}
-      <div className="text-center">
-        <button
-          onClick={isReset ? resetSelections : generateCUR}
-          className={`px-6 py-2 rounded shadow ${
-            isReset
-              ? "bg-red-600 text-white hover:bg-red-700"
-              : selectedProfile && distribution
-              ? "bg-blue-600 text-white hover:bg-blue-700"
-              : "bg-gray-400 text-gray-700 cursor-not-allowed"
-          }`}
-          disabled={!selectedProfile || !distribution}
-        >
-          {isReset ? "Reset" : "Generate CUR"}
-        </button>
-      </div>
-
-      {/* Display Response */}
-      {response && (
-        <div className="mt-6 text-center">
-          <a
-            href={response.url}
-            className="text-blue-700 underline"
-            download
-          >
-            Download CUR
-          </a>
-        </div>
-      )}
-
-      {/* Footer Section */}
-      <footer className="bg-gray-800 text-gray-300 py-4 text-center fixed bottom-0 w-full">
-        <p className="text-sm">
-          Disclaimer: This data is not real and is only intended for testing
-          purposes. This website is not affiliated with AWS or the FinOps
-          Foundation.
-        </p>
-      </footer>
-    </div>
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <ThemeProvider>
+        <AppContent />
+      </ThemeProvider>
+    </ErrorBoundary>
   );
 }

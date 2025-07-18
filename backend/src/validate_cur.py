@@ -2,7 +2,10 @@ import pandas as pd
 import warnings
 from dateutil import parser
 
-from .focus_metadata import FOCUS_METADATA
+from focus_metadata import FOCUS_METADATA
+from logging_config import setup_logging
+
+logger = setup_logging(__name__)
 
 def validate_focus_df(df: pd.DataFrame) -> None:
     """
@@ -13,6 +16,10 @@ def validate_focus_df(df: pd.DataFrame) -> None:
     Raises ValueError if any hard requirement is violated.
     Prints warnings for recommended columns that are missing or partially violated.
     """
+    logger.info("Starting FOCUS DataFrame validation", extra={
+        "row_count": len(df),
+        "columns": len(df.columns)
+    })
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # 1. CHECK THAT ALL COLUMNS REQUIRED BY THE FOCUS SPEC EXIST
@@ -29,9 +36,9 @@ def validate_focus_df(df: pd.DataFrame) -> None:
         elif feature_level == "recommended":
             # Not strictly an error, but let's warn
             if col_name not in columns_in_df:
-                warnings.warn(
-                    f"Recommended column '{col_name}' is missing from the DataFrame."
-                )
+                msg = f"Recommended column '{col_name}' is missing from the DataFrame."
+                warnings.warn(msg)
+                logger.warning(msg, extra={"column": col_name})
         # For columns that are 'Conditional', we won't enforce presence unless
         # you specifically want to. (We do cross-column checks if they exist.)
 
@@ -55,9 +62,9 @@ def validate_focus_df(df: pd.DataFrame) -> None:
             # If we find nulls, that's a violation
             num_nulls = series.isnull().sum()
             if num_nulls > 0:
-                raise ValueError(
-                    f"Column '{col_name}' has {num_nulls} null values but 'allows_nulls' is False."
-                )
+                error_msg = f"Column '{col_name}' has {num_nulls} null values but 'allows_nulls' is False."
+                logger.error(error_msg, extra={"column": col_name, "null_count": num_nulls})
+                raise ValueError(error_msg)
 
         # 2.2 Allowed values check (if applicable)
         if allowed_values and data_type == "string":

@@ -38,7 +38,7 @@ def fix_imports_in_file(file_path):
 
 def fix_all_imports():
     """Fix imports in all Python files in the backend directory."""
-    backend_dir = Path(__file__).parent / "FOCUS-generator" / "backend"
+    backend_dir = Path(__file__).parent / "backend" / "src"
     
     if not backend_dir.exists():
         print(f"Backend directory not found: {backend_dir}")

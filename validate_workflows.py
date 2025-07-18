@@ -57,11 +57,11 @@ def check_workflow_files() -> List[Tuple[bool, str]]:
 def check_required_files() -> List[Tuple[bool, str]]:
     """Check for required files for deployment."""
     required_files = [
-        "requirements.txt",
-        "FOCUS-generator/backend/main.py",
-        "FOCUS-generator/backend/lambda_handler.py",
-        "FOCUS-generator/frontend/package.json",
-        "FOCUS-generator/frontend/src/App.js",
+        "backend/requirements.txt",
+        "backend/src/main.py",
+        "backend/src/lambda_handler.py",
+        "frontend/package.json",
+        "frontend/src/App.js",
         ".flake8",
         ".gitignore",
         ".env.example"
@@ -78,8 +78,8 @@ def check_dependencies() -> List[Tuple[bool, str]]:
     results = []
     
     # Check requirements.txt
-    if Path("requirements.txt").exists():
-        with open("requirements.txt", 'r') as f:
+    if Path("backend/requirements.txt").exists():
+        with open("backend/requirements.txt", 'r') as f:
             content = f.read()
             required_packages = ["fastapi", "pandas", "boto3", "mangum", "redis", "pydantic"]
             missing = []
@@ -92,10 +92,10 @@ def check_dependencies() -> List[Tuple[bool, str]]:
             else:
                 results.append((True, "✅ All required packages found in requirements.txt"))
     else:
-        results.append((False, "❌ requirements.txt is missing"))
+        results.append((False, "❌ backend/requirements.txt is missing"))
     
     # Check package.json
-    package_json_path = Path("FOCUS-generator/frontend/package.json")
+    package_json_path = Path("frontend/package.json")
     if package_json_path.exists():
         with open(package_json_path, 'r') as f:
             package_data = json.load(f)
