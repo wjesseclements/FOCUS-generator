@@ -1,6 +1,6 @@
 import React from "react";
 import { motion } from "framer-motion";
-import { cn } from "../../lib/utils";
+import { cn } from "../../lib/utils.js";
 
 export const Tabs = ({ children, defaultValue, className, ...props }) => {
   const [activeTab, setActiveTab] = React.useState(defaultValue);

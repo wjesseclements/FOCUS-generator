@@ -1,7 +1,7 @@
 import React from "react";
 import { motion } from "framer-motion";
 import { Cloud, Check } from "lucide-react";
-import { cn } from "../../lib/utils";
+import { cn } from "../../lib/utils.js";
 import Tooltip from "./Tooltip";
 
 const providers = [
