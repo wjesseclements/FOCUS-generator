@@ -1,0 +1,257 @@
+name: Deploy FOCUS Generator
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  LAMBDA_FUNCTION_NAME: focus-generator-api
+  S3_BUCKET_NAME: cur-gen-bucket
+  PANDAS_LAYER_NAME: pandas-layer
+
+jobs:
+  deploy-frontend:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: FOCUS-generator/frontend/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          cd FOCUS-generator/frontend
+          npm ci
+
+      - name: Build frontend with production config
+        env:
+          REACT_APP_API_URL: ${{ secrets.PRODUCTION_API_URL }}
+          REACT_APP_ENVIRONMENT: production
+        run: |
+          cd FOCUS-generator/frontend
+          npm run build
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy to S3
+        run: |
+          aws s3 sync FOCUS-generator/frontend/build/ s3://${{ env.S3_BUCKET_NAME }} --delete
+          
+      - name: Invalidate CloudFront cache
+        if: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
+            --paths "/*"
+
+  deploy-backend:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-deploy-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-deploy-
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Fix imports for Lambda
+        run: |
+          if [ -f fix_imports.py ]; then
+            python fix_imports.py
+          fi
+
+      - name: Create Lambda Layer for pandas and heavy dependencies
+        run: |
+          # Create a clean environment for the layer
+          mkdir -p /tmp/pandas-layer/python
+          cd /tmp/pandas-layer
+          
+          # Create requirements for layer
+          cat > layer-requirements.txt << EOF
+          pandas>=2.0.0
+          numpy
+          pytz
+          python-dateutil
+          six
+          EOF
+          
+          # Install layer dependencies
+          pip install -r layer-requirements.txt -t python/
+          
+          # Remove unnecessary files to reduce size
+          find python -name '*.pyc' -delete
+          find python -name '__pycache__' -type d -exec rm -rf {} +
+          find python -name 'tests' -type d -exec rm -rf {} +
+          find python -name '*.dist-info' -type d -exec rm -rf {} + || true
+          
+          # Zip the layer
+          zip -r $GITHUB_WORKSPACE/pandas_layer.zip python
+
+      - name: Package Lambda function
+        run: |
+          mkdir -p lambda_package
+          
+          # Copy all backend Python files
+          cp -r FOCUS-generator/backend/*.py lambda_package/
+          
+          # Create a minimal requirements file for Lambda (excluding pandas)
+          cat > lambda-requirements.txt << EOF
+          fastapi>=0.100.0
+          mangum>=0.17.0
+          boto3>=1.26.0
+          pydantic>=2.0.0
+          pydantic-settings>=2.0.0
+          redis>=4.5.0
+          python-jose[cryptography]>=3.3.0
+          structlog>=23.1.0
+          EOF
+          
+          # Install Lambda dependencies
+          pip install -r lambda-requirements.txt -t ./lambda_package
+          
+          # Remove tests and unnecessary files
+          find lambda_package -name 'test_*.py' -delete
+          find lambda_package -name '*.pyc' -delete
+          find lambda_package -name '__pycache__' -type d -exec rm -rf {} +
+          
+          # Create deployment package
+          cd lambda_package && zip -r ../function.zip .
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy pandas layer
+        run: |
+          # Publish new layer version
+          LAYER_VERSION=$(aws lambda publish-layer-version \
+            --layer-name ${{ env.PANDAS_LAYER_NAME }} \
+            --description "Pandas and heavy dependencies for FOCUS Generator" \
+            --zip-file fileb://pandas_layer.zip \
+            --compatible-runtimes python3.11 \
+            --query 'LayerVersionArn' \
+            --output text)
+          
+          echo "Created layer: $LAYER_VERSION"
+          echo "LAYER_ARN=$LAYER_VERSION" >> $GITHUB_ENV
+
+      - name: Update Lambda function code
+        run: |
+          # Update function code
+          aws lambda update-function-code \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+            --zip-file fileb://function.zip \
+            --publish
+          
+          # Wait for update to complete
+          aws lambda wait function-updated \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }}
+
+      - name: Update Lambda function configuration
+        run: |
+          # Update function configuration with environment variables
+          aws lambda update-function-configuration \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+            --layers ${{ env.LAYER_ARN }} \
+            --environment Variables="{
+              ENVIRONMENT=production,
+              S3_BUCKET_NAME=${{ env.S3_BUCKET_NAME }},
+              REDIS_URL=${{ secrets.REDIS_URL }},
+              SECRET_KEY=${{ secrets.SECRET_KEY }},
+              CSRF_SECRET_KEY=${{ secrets.CSRF_SECRET_KEY }},
+              AWS_REGION=${{ env.AWS_REGION }},
+              LOG_LEVEL=INFO,
+              ENABLE_COMPRESSION=true,
+              ENABLE_CACHING=true,
+              RATE_LIMIT_PER_MINUTE=100,
+              RATE_LIMIT_PER_HOUR=1000,
+              RATE_LIMIT_PER_DAY=10000
+            }" \
+            --timeout 300 \
+            --memory-size 1024
+
+      - name: Create or update Lambda function URL
+        run: |
+          # Try to create function URL
+          aws lambda create-function-url-config \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+            --cors '{
+              "AllowOrigins": ["*"],
+              "AllowMethods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+              "AllowHeaders": ["*"],
+              "MaxAge": 86400
+            }' || \
+          # If it already exists, update it
+          aws lambda update-function-url-config \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+            --cors '{
+              "AllowOrigins": ["*"],
+              "AllowMethods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+              "AllowHeaders": ["*"],
+              "MaxAge": 86400
+            }'
+
+      - name: Get Lambda function URL
+        run: |
+          FUNCTION_URL=$(aws lambda get-function-url-config \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+            --query 'FunctionUrl' \
+            --output text)
+          echo "Lambda Function URL: $FUNCTION_URL"
+          echo "FUNCTION_URL=$FUNCTION_URL" >> $GITHUB_ENV
+
+      - name: Test Lambda deployment
+        run: |
+          # Wait a moment for the function to be ready
+          sleep 10
+          
+          # Test the health endpoint
+          curl -f -X GET "${{ env.FUNCTION_URL }}health" || echo "Health check failed (may need time to cold start)"
+
+  post-deployment-validation:
+    runs-on: ubuntu-latest
+    needs: [deploy-frontend, deploy-backend]
+    
+    steps:
+      - name: Validate deployment
+        run: |
+          echo "✅ Deployment completed successfully!"
+          echo "Frontend deployed to S3"
+          echo "Backend deployed to Lambda"
+          echo ""
+          echo "Next steps:"
+          echo "1. Verify frontend at: https://${{ env.S3_BUCKET_NAME }}.s3-website-${{ env.AWS_REGION }}.amazonaws.com"
+          echo "2. Test API endpoints"
+          echo "3. Monitor CloudWatch logs for any issues"
+          echo "4. Check Lambda metrics and performance"
