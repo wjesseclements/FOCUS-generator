@@ -1,17 +1,14 @@
 import React, { useMemo, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import {
   BarChart,
   Bar,
   PieChart,
   Pie,
-  LineChart,
-  Line,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
-  Legend,
   ResponsiveContainer,
   Cell,
   Treemap,
@@ -34,7 +31,6 @@ const fadeInUp = {
 
 const CURVisualization = ({ data }) => {
   const [selectedService, setSelectedService] = useState(null);
-  const [animationComplete, setAnimationComplete] = useState(false);
 
   // Process data for visualizations
   const { serviceData, providerData, dailyData, topResources, regionData, resourceTypeData } = useMemo(() => {
@@ -145,7 +141,6 @@ const CURVisualization = ({ data }) => {
       initial="initial"
       animate="animate"
       className="space-y-6"
-      onAnimationComplete={() => setAnimationComplete(true)}
     >
       {/* KPI Summary Cards */}
       <KPISummary data={data} />

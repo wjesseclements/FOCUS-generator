@@ -7,7 +7,6 @@ import {
   Clock,
   CheckCircle2,
   BarChart2,
-  Eye,
   EyeOff
 } from "lucide-react";
 import { Button } from "./button";

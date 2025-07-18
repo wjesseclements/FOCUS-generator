@@ -7,7 +7,6 @@ import {
   Activity,
   Server,
   Calendar,
-  CreditCard,
   Zap
 } from "lucide-react";
 import { Card, CardContent } from "../ui/card";
