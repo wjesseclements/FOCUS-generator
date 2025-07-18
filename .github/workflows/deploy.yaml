@@ -192,7 +192,6 @@ jobs:
               REDIS_URL=${{ secrets.REDIS_URL }},
               SECRET_KEY=${{ secrets.SECRET_KEY }},
               CSRF_SECRET_KEY=${{ secrets.CSRF_SECRET_KEY }},
-              AWS_REGION=${{ env.AWS_REGION }},
               LOG_LEVEL=INFO,
               LOG_FORMAT=json,
               ENABLE_COMPRESSION=true,
